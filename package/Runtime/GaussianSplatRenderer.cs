@@ -328,6 +328,10 @@ namespace GaussianSplatting.Runtime
             public static readonly int SelectionMode = Shader.PropertyToID("_SelectionMode");
             public static readonly int SplatPosMouseDown = Shader.PropertyToID("_SplatPosMouseDown");
             public static readonly int SplatOtherMouseDown = Shader.PropertyToID("_SplatOtherMouseDown");
+            // Stereo rendering properties
+            public static readonly int WorldToClipMatrix = Shader.PropertyToID("_WorldToClipMatrix");
+            public static readonly int WorldToClipMatrixRight = Shader.PropertyToID("_WorldToClipMatrixRight");
+            public static readonly int IsStereoEnabled = Shader.PropertyToID("_IsStereoEnabled");
         }
 
         [field: NonSerialized] public bool editModified { get; private set; }
@@ -598,6 +602,40 @@ namespace GaussianSplatting.Runtime
             cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.MatrixObjectToWorld, matO2W);
             cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.MatrixWorldToObject, matW2O);
 
+            // Set up stereo rendering matrices if needed
+            bool isStereo = XRSettings.enabled && XRSettings.stereoRenderingMode != 0;
+            
+            // Left eye (or mono) world-to-clip matrix
+            Matrix4x4 worldToClipMatrix = cam.projectionMatrix * matView;
+            cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.WorldToClipMatrix, worldToClipMatrix);
+            
+            // Right eye world-to-clip matrix (only needed for stereo)
+            if (isStereo)
+            {
+                // Get eye matrices from the XR display
+                Matrix4x4 stereoViewMatrixLeft = cam.GetStereoViewMatrix(Camera.StereoscopicEye.Left);
+                Matrix4x4 stereoViewMatrixRight = cam.GetStereoViewMatrix(Camera.StereoscopicEye.Right);
+                Matrix4x4 stereoProjectionMatrixLeft = cam.GetStereoProjectionMatrix(Camera.StereoscopicEye.Left);
+                Matrix4x4 stereoProjectionMatrixRight = cam.GetStereoProjectionMatrix(Camera.StereoscopicEye.Right);
+                
+                // Fix the right eye matrix to match our convention (negate z)
+                stereoViewMatrixRight.m20 *= -1;
+                stereoViewMatrixRight.m21 *= -1;
+                stereoViewMatrixRight.m22 *= -1;
+                
+                // Right eye
+                Matrix4x4 rightWorldToClipMatrix = stereoProjectionMatrixRight * stereoViewMatrixRight * matO2W;
+                cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.WorldToClipMatrixRight, rightWorldToClipMatrix);
+            }
+            else
+            {
+                // For non-stereo, just use the same matrix for both eyes
+                cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.WorldToClipMatrixRight, worldToClipMatrix);
+            }
+            
+            // Set stereo flag
+            cmb.SetComputeIntParam(m_CSSplatUtilities, Props.IsStereoEnabled, isStereo ? 1 : 0);
+
             cmb.SetComputeVectorParam(m_CSSplatUtilities, Props.VecScreenParams, screenPar);
             cmb.SetComputeVectorParam(m_CSSplatUtilities, Props.VecWorldSpaceCameraPos, camPos);
             cmb.SetComputeFloatParam(m_CSSplatUtilities, Props.SplatScale, m_SplatScale);
@@ -627,6 +665,42 @@ namespace GaussianSplatting.Runtime
             cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcDistances, Props.SplatPos, m_GpuPosData);
             cmd.SetComputeIntParam(m_CSSplatUtilities, Props.SplatFormat, (int)m_Asset.posFormat);
             cmd.SetComputeMatrixParam(m_CSSplatUtilities, Props.MatrixMV, worldToCamMatrix * matrix);
+            cmd.SetComputeMatrixParam(m_CSSplatUtilities, Props.MatrixObjectToWorld, matrix);
+            
+            // Set up stereo rendering matrices if needed
+            bool isStereo = XRSettings.enabled && XRSettings.stereoRenderingMode != 0;
+            
+            // Left eye (or mono) world-to-clip matrix
+            Matrix4x4 worldToClipMatrix = cam.projectionMatrix * worldToCamMatrix;
+            cmd.SetComputeMatrixParam(m_CSSplatUtilities, Props.WorldToClipMatrix, worldToClipMatrix);
+            
+            // Right eye world-to-clip matrix (only needed for stereo)
+            if (isStereo)
+            {
+                // Get eye matrices from the XR display
+                Matrix4x4 stereoViewMatrixLeft = cam.GetStereoViewMatrix(Camera.StereoscopicEye.Left);
+                Matrix4x4 stereoViewMatrixRight = cam.GetStereoViewMatrix(Camera.StereoscopicEye.Right);
+                Matrix4x4 stereoProjectionMatrixLeft = cam.GetStereoProjectionMatrix(Camera.StereoscopicEye.Left);
+                Matrix4x4 stereoProjectionMatrixRight = cam.GetStereoProjectionMatrix(Camera.StereoscopicEye.Right);
+                
+                // Fix the right eye matrix to match our convention (negate z)
+                stereoViewMatrixRight.m20 *= -1;
+                stereoViewMatrixRight.m21 *= -1;
+                stereoViewMatrixRight.m22 *= -1;
+                
+                // Right eye
+                Matrix4x4 rightWorldToClipMatrix = stereoProjectionMatrixRight * stereoViewMatrixRight * matrix;
+                cmd.SetComputeMatrixParam(m_CSSplatUtilities, Props.WorldToClipMatrixRight, rightWorldToClipMatrix);
+            }
+            else
+            {
+                // For non-stereo, just use the same matrix for both eyes
+                cmd.SetComputeMatrixParam(m_CSSplatUtilities, Props.WorldToClipMatrixRight, worldToClipMatrix);
+            }
+            
+            // Set stereo flag
+            cmd.SetComputeIntParam(m_CSSplatUtilities, Props.IsStereoEnabled, isStereo ? 1 : 0);
+            
             cmd.SetComputeIntParam(m_CSSplatUtilities, Props.SplatCount, m_SplatCount);
             cmd.SetComputeIntParam(m_CSSplatUtilities, Props.SplatChunkCount, m_GpuChunksValid ? m_GpuChunks.count : 0);
             m_CSSplatUtilities.GetKernelThreadGroupSizes((int)KernelIndices.CalcDistances, out uint gsX, out _, out _);

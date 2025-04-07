@@ -607,29 +607,116 @@ SplatData LoadSplatData(uint idx)
     return s;
 }
 
+// Define camera target texture - KEEP THIS HERE (used by multiple shaders)
+sampler2D _CameraTargetTexture;
+float4 _CameraTargetTexture_TexelSize;
+
+// Data for a single splat's view projection
 struct SplatViewData
 {
+    // Left eye (or mono) position in clip space
     float4 pos;
-    float2 axis1, axis2;
-    uint2 color; // 4xFP16
+    
+    // Right eye position in clip space (for VR)
+    float4 posRight;
+    
+    // Packed axes for both eyes:
+    // xy = Left eye (or mono) first axis
+    // zw = Right eye first axis
+    float4 axis1;
+    
+    // Packed axes for both eyes:
+    // xy = Left eye (or mono) second axis
+    // zw = Right eye second axis
+    float4 axis2;
+    
+    // Packed RGBA color as two FP16 values
+    uint color;  // R in high bits, G in low bits
+    uint color2; // B in high bits, A in low bits
 };
 
-// If we are rendering into backbuffer directly (e.g. HDR off, no postprocessing),
-// the color target texture is a render target (so projection is upside down),
-// but the depth buffer we get is not upside down. We want to flip
-// our rendering upside down manually for this case.
-//
-// There does not seem to be a good way to detect this situation in Unity; work around it
-// by setting _CameraTargetTexture global texture to BuiltinRenderTextureType.CameraTarget
-// from the command buffer. When CameraTarget will be null (i.e. backbuffer), the _TexeSize
-// property of the texture will get set to (1,1,1,1).
-//
-// One could hope someday Unity will fix all this upside-down thingy...
-float4 _CameraTargetTexture_TexelSize;
-void FlipProjectionIfBackbuffer(inout float4 vpos)
+// Helpers for accessing the correct eye data
+float2 GetAxis1(SplatViewData view, uint eyeIndex)
 {
-    if (_CameraTargetTexture_TexelSize.z == 1.0)
-        vpos.y = -vpos.y;
+    return eyeIndex == 0 ? view.axis1.xy : view.axis1.zw;
+}
+
+float2 GetAxis2(SplatViewData view, uint eyeIndex)
+{
+    return eyeIndex == 0 ? view.axis2.xy : view.axis2.zw;
+}
+
+float4 GetPosition(SplatViewData view, uint eyeIndex)
+{
+    return eyeIndex == 0 ? view.pos : view.posRight;
+}
+
+// Helper function to check if stereo rendering is enabled based on
+// Unity's predefined macros
+bool IsStereoEnabled() 
+{
+    // Check if we're using any of Unity's stereo rendering methods
+    #if defined(STEREO_MULTIVIEW_ON) || defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_SINGLE_PASS_STEREO)
+        return true;
+    #else
+        return false;
+    #endif
+}
+
+// Scale factor to control the size of the Gaussian splats
+// (1.0 is default scale)
+float _SplatScale;
+
+// Helper function to flip Y coordinate when rendering to backbuffer
+void FlipProjectionIfBackbuffer(inout float4 clipPos)
+{
+    #if UNITY_UV_STARTS_AT_TOP
+        // On platforms where backbuffer is flipped (Direct3D-like)
+        // we flip the Y direction only when rendering directly to backbuffer
+        if (_CameraTargetTexture_TexelSize.y < 0)
+            clipPos.y = -clipPos.y;
+    #endif
+}
+
+// Compute the UVs for a screen-space effect
+float2 ComputeScreenPos(float4 clipPos)
+{
+    float2 screenUV = clipPos.xy / clipPos.w;
+    screenUV = screenUV * 0.5 + 0.5;
+    
+    #if UNITY_UV_STARTS_AT_TOP
+        // Only when not directly rendering to backbuffer
+        if (_CameraTargetTexture_TexelSize.y > 0)
+            screenUV.y = 1.0 - screenUV.y;
+    #endif
+    
+    return screenUV;
+}
+
+// Pack a float3 RGB color into two uint values for FP16 storage
+// Usage: PackColor(float3(r,g,b), alpha, out color1, out color2)
+void PackColor(float3 rgb, float a, out uint color1, out uint color2)
+{
+    // Convert float values to FP16 (half-precision)
+    uint r16 = f32tof16(rgb.r);
+    uint g16 = f32tof16(rgb.g);
+    uint b16 = f32tof16(rgb.b);
+    uint a16 = f32tof16(a);
+    
+    // Pack R and G into color1, B and A into color2
+    color1 = (r16 << 16) | g16;
+    color2 = (b16 << 16) | a16;
+}
+
+// Unpack RGB color and alpha from packed FP16 format
+// Usage: float3 rgb; float a; UnpackColor(color1, color2, rgb, a);
+void UnpackColor(uint color1, uint color2, out float3 rgb, out float a)
+{
+    // Extract individual FP16 components
+    rgb.r = f16tof32(color1 >> 16);
+    rgb.g = f16tof32(color1);
+    rgb.b = f16tof32(color2 >> 16);
+    a = f16tof32(color2);
 }
 
 #endif // GAUSSIAN_SPLATTING_HLSL

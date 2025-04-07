@@ -16,6 +16,13 @@
 #pragma kernel CSScaleSelection
 #pragma kernel CSExportData
 #pragma kernel CSCopySplats
+#pragma kernel CSCalcStereoViewData
+#pragma kernel CSGenerateOrder
+#pragma kernel CSFilterOrder
+#pragma kernel CSEvaluateColor
+#pragma kernel CSResetKDRootNode
+#pragma kernel CSCreateKDTree
+#pragma kernel CSGenerateKDTreeOrder
 
 // DeviceRadixSort
 #pragma multi_compile __ KEY_UINT KEY_INT KEY_FLOAT
@@ -43,6 +50,11 @@ float4x4 _MatrixMV;
 float4 _VecScreenParams;
 float4 _VecWorldSpaceCameraPos;
 int _SelectionMode;
+
+// Stereo rendering matrices
+float4x4 _WorldToClipMatrix;      // Left eye (or mono) matrix
+float4x4 _WorldToClipMatrixRight; // Right eye matrix for VR
+uint _IsStereoEnabled;            // Flag to indicate stereo rendering is active
 
 RWStructuredBuffer<uint> _SplatSortDistances;
 RWStructuredBuffer<uint> _SplatSortKeys;
@@ -76,9 +88,51 @@ void CSCalcDistances (uint3 id : SV_DispatchThreadID)
     uint origIdx = _SplatSortKeys[idx];
 
     float3 pos = LoadSplatPos(origIdx);
-    pos = mul(_MatrixMV, float4(pos.xyz, 1)).xyz;
+    float3 worldPos = mul(_MatrixObjectToWorld, float4(pos.xyz, 1)).xyz;
+    
+    // Calculate the appropriate depth value based on stereo mode
+    float depth;
+    
+    if (_IsStereoEnabled > 0)
+    {
+        // Calculate depth for both eyes in stereo mode
+        float4 clipPosLeft = mul(_WorldToClipMatrix, float4(worldPos, 1.0));
+        float4 clipPosRight = mul(_WorldToClipMatrixRight, float4(worldPos, 1.0));
+        
+        bool behindCamLeft = clipPosLeft.w <= 0;
+        bool behindCamRight = clipPosRight.w <= 0;
+        
+        if (behindCamLeft && behindCamRight)
+        {
+            // Behind both cameras, use a large depth value
+            depth = 1e6;
+        }
+        else if (behindCamLeft)
+        {
+            // Only visible to right eye
+            depth = -clipPosRight.z / clipPosRight.w;
+        }
+        else if (behindCamRight)
+        {
+            // Only visible to left eye
+            depth = -clipPosLeft.z / clipPosLeft.w;
+        }
+        else
+        {
+            // Visible to both eyes, use minimum depth
+            float depthLeft = -clipPosLeft.z / clipPosLeft.w;
+            float depthRight = -clipPosRight.z / clipPosRight.w;
+            depth = min(depthLeft, depthRight);
+        }
+    }
+    else
+    {
+        // For non-stereo mode, use standard depth calculation
+        pos = mul(_MatrixMV, float4(pos.xyz, 1)).xyz;
+        depth = pos.z;
+    }
 
-    _SplatSortDistances[idx] = FloatToSortableUint(pos.z);
+    _SplatSortDistances[idx] = FloatToSortableUint(depth);
 }
 
 RWStructuredBuffer<SplatViewData> _SplatViewData;
@@ -104,61 +158,107 @@ RWByteAddressBuffer _SplatSelectedBits;
 ByteAddressBuffer _SplatDeletedBits;
 uint _SplatBitsValid;
 
-void DecomposeCovariance(float3 cov2d, out float2 v1, out float2 v2)
+struct Splat
 {
-    #if 0 // does not quite give the correct results?
+    float3 pos;
+    float3 rot;
+    float3 scale;
+    float3 color;
+    float opacity;
+    float pad0;
+    float pad1;
+};
 
-    // https://jsfiddle.net/mattrossman/ehxmtgw6/
-    // References:
-    // - https://www.youtube.com/watch?v=e50Bj7jn9IQ
-    // - https://en.wikipedia.org/wiki/Eigenvalue_algorithm#2%C3%972_matrices
-    // - https://people.math.harvard.edu/~knill/teaching/math21b2004/exhibits/2dmatrices/index.html
-    float a = cov2d.x;
-    float b = cov2d.y;
-    float d = cov2d.z;
-    float det = a * d - b * b; // matrix is symmetric, so "c" is same as "b"
-    float trace = a + d;
+// View space covariance matrix
+struct Covariance
+{
+    float3 vals[3];
+};
 
-    float mean = 0.5 * trace;
-    float dist = sqrt(mean * mean - det);
-
-    float lambda1 = mean + dist; // 1st eigenvalue
-    float lambda2 = mean - dist; // 2nd eigenvalue
-
-    if (b == 0) {
-        // https://twitter.com/the_ross_man/status/1706342719776551360
-        if (a > d) v1 = float2(1, 0);
-        else v1 = float2(0, 1);
-    } else
-        v1 = normalize(float2(b, d - lambda2));
-
-    v1.y = -v1.y;
-    // The 2nd eigenvector is just a 90 degree rotation of the first since Gaussian axes are orthogonal
-    v2 = float2(v1.y, -v1.x);
-
-    // scaling components
-    v1 *= sqrt(lambda1);
-    v2 *= sqrt(lambda2);
-
-    float radius = 1.5;
-    v1 *= radius;
-    v2 *= radius;
-
-    #else
-
-    // same as in antimatter15/splat
-    float diag1 = cov2d.x, diag2 = cov2d.z, offDiag = cov2d.y;
-    float mid = 0.5f * (diag1 + diag2);
-    float radius = length(float2((diag1 - diag2) / 2.0, offDiag));
-    float lambda1 = mid + radius;
-    float lambda2 = max(mid - radius, 0.1);
-    float2 diagVec = normalize(float2(offDiag, lambda1 - diag1));
-    diagVec.y = -diagVec.y;
-    float maxSize = 4096.0;
-    v1 = min(sqrt(2.0 * lambda1), maxSize) * diagVec;
-    v2 = min(sqrt(2.0 * lambda2), maxSize) * float2(diagVec.y, -diagVec.x);
-
-    #endif
+// Helper functions for eigendecomposition of covariance matrix
+// This is a more stable algorithm than before
+bool DecomposeCovariance(Covariance cov, out float2 axis1, out float2 axis2, out float scale)
+{
+    // Extract 2D covariance matrix components
+    float a = cov.vals[0].x; // cov_xx
+    float b = cov.vals[0].y; // cov_xy
+    float c = cov.vals[1].y; // cov_yy
+    
+    // Calculate determinant, trace, and compute eigenvalues
+    float det = a * c - b * b;
+    float trace = a + c;
+    
+    // Check for degenerate case or numerical issues
+    if (det <= 1e-6 || trace <= 1e-6)
+    {
+        // Return a small circle for degenerate cases
+        axis1 = float2(0.01, 0);
+        axis2 = float2(0, 0.01);
+        scale = 1.0;
+        return false;
+    }
+    
+    // Calculate discriminant
+    float discr = sqrt(max(0.0, (a - c) * (a - c) + 4.0 * b * b));
+    
+    // Compute eigenvalues
+    float lambda1 = (trace + discr) * 0.5;
+    float lambda2 = (trace - discr) * 0.5;
+    
+    // Ensure minimum eigenvalue size to prevent degenerate splats
+    lambda1 = max(lambda1, 0.01);
+    lambda2 = max(lambda2, 0.01);
+    
+    // Calculate eigenvectors
+    float2 v1, v2;
+    
+    // Handle near-isotropic case
+    if (abs(discr) < 1e-6 * trace)
+    {
+        // For nearly isotropic case, use canonical basis
+        v1 = float2(1.0, 0.0);
+        v2 = float2(0.0, 1.0);
+    }
+    else
+    {
+        if (abs(a - lambda1) > abs(c - lambda1))
+        {
+            // First eigenvector computation method
+            v1 = normalize(float2(b, lambda1 - a));
+        }
+        else
+        {
+            // Alternate method if first is unstable
+            v1 = normalize(float2(lambda1 - c, b));
+        }
+        
+        // Second eigenvector is perpendicular to first
+        v2 = float2(-v1.y, v1.x);
+        
+        // For VR, we need to ensure deterministic orientation
+        // This ensures consistent visuals across both eyes
+        if (v1.x < 0.0) // Ensure consistent sign
+        {
+            v1 = -v1;
+            v2 = -v2;
+        }
+    }
+    
+    // Scale eigenvectors by sqrt of eigenvalues for final axes
+    axis1 = v1 * sqrt(lambda1);
+    axis2 = v2 * sqrt(lambda2);
+    
+    // Clamp maximum size to prevent oversized splats
+    float maxSize = 0.1;
+    if (length(axis1) > maxSize || length(axis2) > maxSize)
+    {
+        float factor = maxSize / max(length(axis1), length(axis2));
+        axis1 *= factor;
+        axis2 *= factor;
+    }
+    
+    scale = 1.0;
+    return true;
 }
 
 bool IsSplatCut(float3 pos)
@@ -754,4 +854,260 @@ void CSCopySplats (uint3 id : SV_DispatchThreadID)
         uint dstBitIdx = dstIdx & 31;
         _CopyDstEditDeleted.InterlockedOr(dstWordIdx * 4, 1u << dstBitIdx);
     }
+}
+
+float Luminance(float3 rgb)
+{
+    return dot(rgb, float3(0.2126f, 0.7152f, 0.0722f));
+}
+
+struct SortEntry
+{
+    uint idx;
+    float depth;
+};
+
+RWStructuredBuffer<SortEntry> _SortEntries;
+
+[numthreads(64, 1, 1)]
+void CSGenerateOrder(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= _SplatCount)
+        return;
+
+    SplatViewData view = _SplatViewData[i];
+    float depth;
+    if (view.pos.w <= 0 && view.posRight.w <= 0)
+    {
+        // Both eyes can't see this splat, put at the end
+        depth = 1e6;
+    }
+    else if (view.pos.w <= 0)
+    {
+        // Left eye can't see it, use right eye depth
+        depth = -view.posRight.z / view.posRight.w;
+    }
+    else if (view.posRight.w <= 0)
+    {
+        // Right eye can't see it, use left eye depth
+        depth = -view.pos.z / view.pos.w;
+    }
+    else
+    {
+        // Both eyes can see it, use minimum depth
+        float depthLeft = -view.pos.z / view.pos.w;
+        float depthRight = -view.posRight.z / view.posRight.w;
+        depth = min(depthLeft, depthRight);
+    }
+
+    _SortEntries[i].idx = i;
+    _SortEntries[i].depth = depth;
+}
+
+// Stereo VR version of the splat view calculation
+[numthreads(64, 1, 1)]
+void CSCalcStereoViewData(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= _SplatCount)
+        return;
+
+    SplatViewData view = (SplatViewData)0;
+    Splat splat = _Splats[i];
+
+    // Convert from object to world space
+    float3 worldPos = mul(_ObjectToWorldMatrix, float4(splat.pos, 1.0)).xyz;
+
+    // Transform to view space
+    float3 quat = EulerToQuat(splat.rot);
+    float3 s = splat.scale * _QScale;
+
+    // Scale is half-widths
+    float sx = s.x * s.x;
+    float sy = s.y * s.y;
+    float sz = s.z * s.z;
+
+    // Transform to view space for LEFT eye
+    float4 centerClipPosLeft = mul(_WorldToClipMatrix, float4(worldPos, 1.0));
+    view.pos = centerClipPosLeft;
+    
+    // Transform to view space for RIGHT eye
+    float4 centerClipPosRight = mul(_WorldToClipMatrixRight, float4(worldPos, 1.0));
+    view.posRight = centerClipPosRight;
+    
+    // Check if the splat is behind BOTH cameras - if so, we can skip it entirely
+    bool behindCamLeft = centerClipPosLeft.w <= 0;
+    bool behindCamRight = centerClipPosRight.w <= 0;
+    
+    if (behindCamLeft && behindCamRight)
+    {
+        _SplatViewData[i] = view;
+        return;
+    }
+
+    // Compute covariance in world space - same for both eyes
+    float s1 = sin(quat.x);
+    float c1 = cos(quat.x);
+    float s2 = sin(quat.y);
+    float c2 = cos(quat.y);
+    float s3 = sin(quat.z);
+    float c3 = cos(quat.z);
+
+    float m11 = c2 * c3;
+    float m12 = -c2 * s3;
+    float m13 = s2;
+    float m21 = c1 * s3 + s1 * s2 * c3;
+    float m22 = c1 * c3 - s1 * s2 * s3;
+    float m23 = -s1 * c2;
+    float m31 = s1 * s3 - c1 * s2 * c3;
+    float m32 = s1 * c3 + c1 * s2 * s3;
+    float m33 = c1 * c2;
+
+    float3 axisx = float3(sx * m11, sx * m21, sx * m31);
+    float3 axisy = float3(sy * m12, sy * m22, sy * m32);
+    float3 axisz = float3(sz * m13, sz * m23, sz * m33);
+
+    Covariance cov;
+    cov.vals[0] = float3(dot(axisx, axisx), dot(axisx, axisy), dot(axisx, axisz));
+    cov.vals[1] = float3(dot(axisy, axisx), dot(axisy, axisy), dot(axisy, axisz));
+    cov.vals[2] = float3(dot(axisz, axisx), dot(axisz, axisy), dot(axisz, axisz));
+    
+    //-----------------------------------------------------------------------
+    // LEFT EYE covariance calculation
+    //-----------------------------------------------------------------------
+    
+    // Extract projection components for LEFT eye
+    float3 xpLeft = mul((float3x3)_WorldToClipMatrix, float3(1, 0, 0));
+    float3 ypLeft = mul((float3x3)_WorldToClipMatrix, float3(0, 1, 0));
+    float3 zpLeft = mul((float3x3)_WorldToClipMatrix, float3(0, 0, 1));
+
+    // Normalize projection components
+    float3 cenLeft = (centerClipPosLeft.xyz / centerClipPosLeft.w) * 0.5 + 0.5;
+    xpLeft = xpLeft * 0.5;
+    ypLeft = ypLeft * 0.5;
+    zpLeft = zpLeft * 0.5;
+
+    // Calculate view covariance for LEFT eye
+    Covariance viewCovLeft;
+    // First row of covariance matrix
+    viewCovLeft.vals[0] = float3(
+        xpLeft.x * xpLeft.x * cov.vals[0].x + ypLeft.x * ypLeft.x * cov.vals[1].y + zpLeft.x * zpLeft.x * cov.vals[2].z
+            + 2 * xpLeft.x * ypLeft.x * cov.vals[0].y + 2 * xpLeft.x * zpLeft.x * cov.vals[0].z + 2 * ypLeft.x * zpLeft.x * cov.vals[1].z,
+        xpLeft.x * xpLeft.y * cov.vals[0].x + ypLeft.x * ypLeft.y * cov.vals[1].y + zpLeft.x * zpLeft.y * cov.vals[2].z
+            + (xpLeft.x * ypLeft.y + xpLeft.y * ypLeft.x) * cov.vals[0].y + (xpLeft.x * zpLeft.y + xpLeft.y * zpLeft.x) * cov.vals[0].z + (ypLeft.x * zpLeft.y + ypLeft.y * zpLeft.x) * cov.vals[1].z,
+        xpLeft.x * xpLeft.z * cov.vals[0].x + ypLeft.x * ypLeft.z * cov.vals[1].y + zpLeft.x * zpLeft.z * cov.vals[2].z
+            + (xpLeft.x * ypLeft.z + xpLeft.z * ypLeft.x) * cov.vals[0].y + (xpLeft.x * zpLeft.z + xpLeft.z * zpLeft.x) * cov.vals[0].z + (ypLeft.x * zpLeft.z + ypLeft.z * zpLeft.x) * cov.vals[1].z
+    );
+    // Second row of covariance matrix
+    viewCovLeft.vals[1] = float3(
+        viewCovLeft.vals[0].y,
+        xpLeft.y * xpLeft.y * cov.vals[0].x + ypLeft.y * ypLeft.y * cov.vals[1].y + zpLeft.y * zpLeft.y * cov.vals[2].z
+            + 2 * xpLeft.y * ypLeft.y * cov.vals[0].y + 2 * xpLeft.y * zpLeft.y * cov.vals[0].z + 2 * ypLeft.y * zpLeft.y * cov.vals[1].z,
+        xpLeft.y * xpLeft.z * cov.vals[0].x + ypLeft.y * ypLeft.z * cov.vals[1].y + zpLeft.y * zpLeft.z * cov.vals[2].z
+            + (xpLeft.y * ypLeft.z + xpLeft.z * ypLeft.y) * cov.vals[0].y + (xpLeft.y * zpLeft.z + xpLeft.z * zpLeft.y) * cov.vals[0].z + (ypLeft.y * zpLeft.z + ypLeft.z * zpLeft.y) * cov.vals[1].z
+    );
+    // Third row of covariance matrix
+    viewCovLeft.vals[2] = float3(
+        viewCovLeft.vals[0].z,
+        viewCovLeft.vals[1].z,
+        xpLeft.z * xpLeft.z * cov.vals[0].x + ypLeft.z * ypLeft.z * cov.vals[1].y + zpLeft.z * zpLeft.z * cov.vals[2].z
+            + 2 * xpLeft.z * ypLeft.z * cov.vals[0].y + 2 * xpLeft.z * zpLeft.z * cov.vals[0].z + 2 * ypLeft.z * zpLeft.z * cov.vals[1].z
+    );
+
+    // Compute 2D axes for LEFT eye
+    float2 axis1Left, axis2Left;
+    float scaleLeft;
+    DecomposeCovariance(viewCovLeft, axis1Left, axis2Left, scaleLeft);
+    
+    //-----------------------------------------------------------------------
+    // RIGHT EYE covariance calculation
+    //-----------------------------------------------------------------------
+    
+    // Extract projection components for RIGHT eye
+    float3 xpRight = mul((float3x3)_WorldToClipMatrixRight, float3(1, 0, 0));
+    float3 ypRight = mul((float3x3)_WorldToClipMatrixRight, float3(0, 1, 0));
+    float3 zpRight = mul((float3x3)_WorldToClipMatrixRight, float3(0, 0, 1));
+
+    // Normalize projection components
+    float3 cenRight = (centerClipPosRight.xyz / centerClipPosRight.w) * 0.5 + 0.5;
+    xpRight = xpRight * 0.5;
+    ypRight = ypRight * 0.5;
+    zpRight = zpRight * 0.5;
+
+    // Calculate view covariance for RIGHT eye (identical calculation structure to left eye)
+    Covariance viewCovRight;
+    // First row of covariance matrix
+    viewCovRight.vals[0] = float3(
+        xpRight.x * xpRight.x * cov.vals[0].x + ypRight.x * ypRight.x * cov.vals[1].y + zpRight.x * zpRight.x * cov.vals[2].z
+            + 2 * xpRight.x * ypRight.x * cov.vals[0].y + 2 * xpRight.x * zpRight.x * cov.vals[0].z + 2 * ypRight.x * zpRight.x * cov.vals[1].z,
+        xpRight.x * xpRight.y * cov.vals[0].x + ypRight.x * ypRight.y * cov.vals[1].y + zpRight.x * zpRight.y * cov.vals[2].z
+            + (xpRight.x * ypRight.y + xpRight.y * ypRight.x) * cov.vals[0].y + (xpRight.x * zpRight.y + xpRight.y * zpRight.x) * cov.vals[0].z + (ypRight.x * zpRight.y + ypRight.y * zpRight.x) * cov.vals[1].z,
+        xpRight.x * xpRight.z * cov.vals[0].x + ypRight.x * ypRight.z * cov.vals[1].y + zpRight.x * zpRight.z * cov.vals[2].z
+            + (xpRight.x * ypRight.z + xpRight.z * ypRight.x) * cov.vals[0].y + (xpRight.x * zpRight.z + xpRight.z * zpRight.x) * cov.vals[0].z + (ypRight.x * zpRight.z + ypRight.z * zpRight.x) * cov.vals[1].z
+    );
+    // Second row of covariance matrix
+    viewCovRight.vals[1] = float3(
+        viewCovRight.vals[0].y,
+        xpRight.y * xpRight.y * cov.vals[0].x + ypRight.y * ypRight.y * cov.vals[1].y + zpRight.y * zpRight.y * cov.vals[2].z
+            + 2 * xpRight.y * ypRight.y * cov.vals[0].y + 2 * xpRight.y * zpRight.y * cov.vals[0].z + 2 * ypRight.y * zpRight.y * cov.vals[1].z,
+        xpRight.y * xpRight.z * cov.vals[0].x + ypRight.y * ypRight.z * cov.vals[1].y + zpRight.y * zpRight.z * cov.vals[2].z
+            + (xpRight.y * ypRight.z + xpRight.z * ypRight.y) * cov.vals[0].y + (xpRight.y * zpRight.z + xpRight.z * zpRight.y) * cov.vals[0].z + (ypRight.y * zpRight.z + ypRight.z * zpRight.y) * cov.vals[1].z
+    );
+    // Third row of covariance matrix
+    viewCovRight.vals[2] = float3(
+        viewCovRight.vals[0].z,
+        viewCovRight.vals[1].z,
+        xpRight.z * xpRight.z * cov.vals[0].x + ypRight.z * ypRight.z * cov.vals[1].y + zpRight.z * zpRight.z * cov.vals[2].z
+            + 2 * xpRight.z * ypRight.z * cov.vals[0].y + 2 * xpRight.z * zpRight.z * cov.vals[0].z + 2 * ypRight.z * zpRight.z * cov.vals[1].z
+    );
+
+    // Compute 2D axes for RIGHT eye
+    float2 axis1Right, axis2Right;
+    float scaleRight;
+    DecomposeCovariance(viewCovRight, axis1Right, axis2Right, scaleRight);
+
+    // Apply aspect ratio correction for both eyes
+    float2 wh = _ScreenParams.xy;
+    float aspect = wh.y / wh.x;
+    
+    // Store axes for LEFT eye
+    view.axis1.xy = float2(axis1Left.x / aspect, axis1Left.y);
+    view.axis2.xy = float2(axis2Left.x / aspect, axis2Left.y);
+    
+    // Store axes for RIGHT eye
+    view.axis1.zw = float2(axis1Right.x / aspect, axis1Right.y);
+    view.axis2.zw = float2(axis2Right.x / aspect, axis2Right.y);
+
+    // Pack color for FP16 storage
+    PackColor(splat.color, splat.opacity, view.color, view.color2);
+    
+    _SplatViewData[i] = view;
+}
+
+float3 EulerToQuat(float3 euler)
+{
+    // Convert Euler angles (in radians) to a quaternion representation
+    // This isn't a true quaternion since we're returning a float3, but it's
+    // simply a consistent representation for rotation that our code expects
+    
+    // For proper quaternion conversion (not needed here since we just
+    // use sines and cosines of the angles directly in the matrix):
+    // float cx = cos(euler.x * 0.5);
+    // float sx = sin(euler.x * 0.5);
+    // float cy = cos(euler.y * 0.5);
+    // float sy = sin(euler.y * 0.5);
+    // float cz = cos(euler.z * 0.5);
+    // float sz = sin(euler.z * 0.5);
+    // 
+    // float qw = cx*cy*cz + sx*sy*sz;
+    // float qx = sx*cy*cz - cx*sy*sz;
+    // float qy = cx*sy*cz + sx*cy*sz;
+    // float qz = cx*cy*sz - sx*sy*cz;
+    // 
+    // return float4(qx, qy, qz, qw);
+    
+    // For our code, we just keep the Euler angles as is,
+    // since we compute sines and cosines in the transformation matrix directly
+    return euler;
 }
