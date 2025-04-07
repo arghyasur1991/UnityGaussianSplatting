@@ -16,7 +16,26 @@ CGPROGRAM
 #pragma fragment frag
 #pragma require compute
 #pragma use_dxc
+// Use ONE of the stereo rendering methods but not both simultaneously
+#pragma multi_compile_local _ STEREO_MULTIVIEW_ON
 
+// Ensure both stereo modes aren't active simultaneously
+// Instead of error, prioritize multiview over instancing when both are defined
+#if defined(STEREO_MULTIVIEW_ON) && defined(UNITY_STEREO_INSTANCING_ENABLED)
+    // When both are defined, prioritize STEREO_MULTIVIEW_ON and disable instancing
+    #undef UNITY_STEREO_INSTANCING_ENABLED
+    #undef STEREO_INSTANCING_ON
+    #undef UNITY_SINGLE_PASS_STEREO
+    // Keep multiview features enabled, making it the only active stereo mode
+    #define ONLY_USE_MULTIVIEW
+#endif
+
+// Enable instancing modes if multiview is not defined
+#if !defined(STEREO_MULTIVIEW_ON)
+    #pragma multi_compile_local _ UNITY_STEREO_INSTANCING_ENABLED UNITY_SINGLE_PASS_STEREO STEREO_INSTANCING_ON
+#endif
+
+// Include UnityCG.cginc first for stereo rendering macros
 #include "UnityCG.cginc"
 #include "GaussianSplatting.hlsl"
 
@@ -28,6 +47,7 @@ struct v2f
 {
     half4 col : COLOR0;
     float4 vertex : SV_POSITION;
+    UNITY_VERTEX_OUTPUT_STEREO
 };
 
 float _SplatScale;
@@ -43,6 +63,9 @@ half3 palette(float t, half3 a, half3 b, half3 c, half3 d)
 v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
 {
     v2f o;
+    UNITY_INITIALIZE_OUTPUT(v2f, o);
+    UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(o);
+    
     bool chunks = _DisplayChunks;
 	uint idx = vtxID;
 	float3 localPos = float3(idx&1, (idx>>1)&1, (idx>>2)&1) * 2.0 - 1.0;
@@ -93,6 +116,10 @@ v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
 
 half4 frag (v2f i) : SV_Target
 {
+    #if defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(STEREO_MULTIVIEW_ON) || defined(UNITY_SINGLE_PASS_STEREO)
+    UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(i);
+    #endif
+    
     half4 res = half4(i.col.rgb * i.col.a, i.col.a);
     return res;
 }
