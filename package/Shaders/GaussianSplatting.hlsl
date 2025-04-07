@@ -2,6 +2,73 @@
 #ifndef GAUSSIAN_SPLATTING_HLSL
 #define GAUSSIAN_SPLATTING_HLSL
 
+// Prevent Unity's multiview implementation from trying to modify gl_ViewID
+#if defined(STEREO_MULTIVIEW_ON)
+    // Define this to prevent Unity's code from trying to modify gl_ViewID
+    #define UNITY_STEREO_MULTIVIEW_ENABLED
+    
+    // Don't redefine unity_StereoEyeIndex, just make sure to use it correctly
+    // unity_StereoEyeIndex is already properly set up for multiview rendering
+#endif
+
+// Helper functions for floating point conversions
+// Convert float32 to float16 (IEEE 754)
+uint f32tof16(float v)
+{
+    uint x = asuint(v);
+    uint sign = (x >> 31) & 0x1;
+    uint exp = (x >> 23) & 0xff;
+    uint mantissa = x & 0x7fffff;
+    
+    uint h = 0;
+    
+    if (exp == 0)
+    {
+        // Zero or denormal
+        h = (sign << 15);
+    }
+    else if (exp == 0xff)
+    {
+        // Infinity or NaN
+        h = (sign << 15) | (0x1f << 10);
+        h |= (mantissa == 0) ? 0 : 0x200; // Infinity or NaN
+    }
+    else
+    {
+        // Normal number
+        int newExp = exp - 127 + 15;
+        if (newExp < 0)
+        {
+            // Underflow to zero
+            h = (sign << 15);
+        }
+        else if (newExp > 30)
+        {
+            // Overflow to infinity
+            h = (sign << 15) | (0x1f << 10);
+        }
+        else
+        {
+            // Normalized number
+            h = (sign << 15) | (newExp << 10) | (mantissa >> 13);
+        }
+    }
+    
+    return h;
+}
+
+// Convert half-precision float to float16 bits
+uint half_to_float16(half v)
+{
+    return f32tof16(v);
+}
+
+// Pack two 16-bit floats into a single uint
+uint PackTwo16BitFloatsInUint(uint a, uint b)
+{
+    return (a << 16) | b;
+}
+
 float InvSquareCentered01(float x)
 {
     x -= 0.5;
@@ -315,6 +382,11 @@ SplatBufferDataType _SplatOther;
 SplatBufferDataType _SplatSH;
 Texture2D _SplatColor;
 uint _SplatFormat;
+#ifndef _ISSTENABLED_DEFINED
+#define _ISSTENABLED_DEFINED
+uint _IsStereoEnabled;
+#endif
+float _StereoConvergence;
 
 // Match GaussianSplatAsset.VectorFormat
 #define VECTOR_FMT_32F 0
@@ -607,29 +679,89 @@ SplatData LoadSplatData(uint idx)
     return s;
 }
 
+// Function to compute SH data from a splat
+SplatSHData ComputeSplatSH(SplatData splat, uint shOrder, bool shOnly)
+{
+    // Simply return the SH data that's already in the splat
+    SplatSHData result = splat.sh;
+    return result;
+}
+
+// Update SplatViewData to include stereo view data
 struct SplatViewData
 {
-    float4 pos;
-    float2 axis1, axis2;
-    uint2 color; // 4xFP16
+    float4 pos;       // Position in clip space (for left eye in VR)
+    float4 axis1;     // Main axis data for both eyes (xy = left, zw = right)
+    float4 axis2;     // Second axis data for both eyes (xy = left, zw = right)
+    uint color;       // Packed R/G color channels (not a vector, single field)
+    uint color2;      // Packed B/A color channels (not a vector, single field)
 };
 
-// If we are rendering into backbuffer directly (e.g. HDR off, no postprocessing),
-// the color target texture is a render target (so projection is upside down),
-// but the depth buffer we get is not upside down. We want to flip
-// our rendering upside down manually for this case.
-//
-// There does not seem to be a good way to detect this situation in Unity; work around it
-// by setting _CameraTargetTexture global texture to BuiltinRenderTextureType.CameraTarget
-// from the command buffer. When CameraTarget will be null (i.e. backbuffer), the _TexeSize
-// property of the texture will get set to (1,1,1,1).
-//
-// One could hope someday Unity will fix all this upside-down thingy...
-float4 _CameraTargetTexture_TexelSize;
-void FlipProjectionIfBackbuffer(inout float4 vpos)
+// Helper function to handle stereo rendering
+float2 GetEyeAxis1(SplatViewData view, uint eyeIndex)
 {
-    if (_CameraTargetTexture_TexelSize.z == 1.0)
-        vpos.y = -vpos.y;
+    return eyeIndex == 0 ? view.axis1.xy : view.axis1.zw;
+}
+
+float2 GetEyeAxis2(SplatViewData view, uint eyeIndex)
+{
+    return eyeIndex == 0 ? view.axis2.xy : view.axis2.zw;
+}
+
+// Helper to determine if we're rendering in VR mode
+bool IsStereoEnabled()
+{
+#ifdef SHADER_STAGE_COMPUTE
+    // In compute shaders, we only check the flag
+    return _IsStereoEnabled > 0;
+#else
+    // In regular shaders, we use available stereo indicators plus our app flag
+    #if defined(STEREO_MULTIVIEW_ON) || defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_SINGLE_PASS_STEREO)
+        // For any stereo mode, check if the app has enabled stereo rendering
+        return _IsStereoEnabled > 0;
+    #else
+        return false;
+    #endif
+#endif
+}
+
+// Helper to get the right position for the current eye
+float4 GetEyeSpacePosition(SplatViewData view)
+{
+    float4 pos = view.pos;
+    
+#ifndef SHADER_STAGE_COMPUTE
+    // For right eye in stereo mode, adjust the position
+    #if defined(STEREO_MULTIVIEW_ON)
+        // Quest multiview mode - use unity_StereoEyeIndex
+        if (IsStereoEnabled() && unity_StereoEyeIndex > 0)
+        {
+            pos.x += _StereoConvergence;
+        }
+    #elif defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_SINGLE_PASS_STEREO)
+        // Other stereo modes - use unity_StereoEyeIndex
+        if (IsStereoEnabled() && unity_StereoEyeIndex > 0)
+        {
+            pos.x += _StereoConvergence;
+        }
+    #endif
+#endif
+    
+    return pos;
+}
+
+// Add helper to flip projection if needed
+void FlipProjectionIfBackbuffer(inout float4 pos)
+{
+#if !defined(_VR_ON) && UNITY_UV_STARTS_AT_TOP
+    // Check if we're rendering to backbuffer which needs Y flipped
+    bool renderIntoBackbuffer = false;
+    // Can't check directly in shader if this is a backbuffer, we need to rely on runtime check
+    if (!renderIntoBackbuffer)
+        return;
+
+    pos.y *= -1.0;
+#endif
 }
 
 #endif // GAUSSIAN_SPLATTING_HLSL

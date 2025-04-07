@@ -20,6 +20,7 @@ namespace GaussianSplatting.Runtime
         internal static readonly ProfilerMarker s_ProfDraw = new(ProfilerCategory.Render, "GaussianSplat.Draw", MarkerFlags.SampleGPU);
         internal static readonly ProfilerMarker s_ProfCompose = new(ProfilerCategory.Render, "GaussianSplat.Compose", MarkerFlags.SampleGPU);
         internal static readonly ProfilerMarker s_ProfCalcView = new(ProfilerCategory.Render, "GaussianSplat.CalcView", MarkerFlags.SampleGPU);
+        internal static readonly ProfilerMarker s_ProfCalcStereoView = new(ProfilerCategory.Render, "GaussianSplat.CalcStereoView", MarkerFlags.SampleGPU);
         // ReSharper restore MemberCanBePrivate.Global
 
         public static GaussianSplatRenderSystem instance => ms_Instance ??= new GaussianSplatRenderSystem();
@@ -30,6 +31,9 @@ namespace GaussianSplatting.Runtime
         readonly List<(GaussianSplatRenderer, MaterialPropertyBlock)> m_ActiveSplats = new();
 
         CommandBuffer m_CommandBuffer;
+
+        // Add a new field to track if we're using single pass stereo
+        bool m_IsSinglePassStereo;
 
         public void RegisterSplat(GaussianSplatRenderer r)
         {
@@ -74,6 +78,12 @@ namespace GaussianSplatting.Runtime
         {
             if (cam.cameraType == CameraType.Preview)
                 return false;
+            
+            // More accurate detection of single pass stereo rendering
+            m_IsSinglePassStereo = XRSettings.enabled && 
+                                  (XRSettings.stereoRenderingMode == XRSettings.StereoRenderingMode.SinglePassInstanced ||
+                                   XRSettings.stereoRenderingMode == XRSettings.StereoRenderingMode.SinglePass);
+            
             // gather all active & valid splat objects
             m_ActiveSplats.Clear();
             foreach (var kvp in m_Splats)
@@ -147,10 +157,21 @@ namespace GaussianSplatting.Runtime
                 mpb.SetInteger(GaussianSplatRenderer.Props.SHOnly, gs.m_SHOnly ? 1 : 0);
                 mpb.SetInteger(GaussianSplatRenderer.Props.DisplayIndex, gs.m_RenderMode == GaussianSplatRenderer.RenderMode.DebugPointIndices ? 1 : 0);
                 mpb.SetInteger(GaussianSplatRenderer.Props.DisplayChunks, gs.m_RenderMode == GaussianSplatRenderer.RenderMode.DebugChunkBounds ? 1 : 0);
+                mpb.SetInteger(GaussianSplatRenderer.Props.IsStereoEnabled, m_IsSinglePassStereo ? 1 : 0);
+                mpb.SetFloat(GaussianSplatRenderer.Props.StereoConvergence, XRSettings.enabled ? 0.05f : 0.0f);
 
-                cmb.BeginSample(s_ProfCalcView);
-                gs.CalcViewData(cmb, cam);
-                cmb.EndSample(s_ProfCalcView);
+                if (m_IsSinglePassStereo)
+                {
+                    cmb.BeginSample(s_ProfCalcStereoView);
+                    gs.CalcStereoViewData(cmb, cam);
+                    cmb.EndSample(s_ProfCalcStereoView);
+                }
+                else
+                {
+                    cmb.BeginSample(s_ProfCalcView);
+                    gs.CalcViewData(cmb, cam);
+                    cmb.EndSample(s_ProfCalcView);
+                }
 
                 // draw
                 int indexCount = 6;
@@ -191,7 +212,21 @@ namespace GaussianSplatting.Runtime
 
             InitialClearCmdBuffer(cam);
 
-            m_CommandBuffer.GetTemporaryRT(GaussianSplatRenderer.Props.GaussianSplatRT, -1, -1, 0, FilterMode.Point, GraphicsFormat.R16G16B16A16_SFloat);
+            // Create appropriately sized render target that supports stereo if needed
+            RenderTextureDescriptor rtDesc = new RenderTextureDescriptor(
+                cam.pixelWidth, cam.pixelHeight, 
+                GraphicsFormat.R16G16B16A16_SFloat, 
+                0);
+            
+            if (m_IsSinglePassStereo)
+            {
+                // Enable dimension for single pass stereo
+                rtDesc.dimension = TextureDimension.Tex2DArray;
+                rtDesc.volumeDepth = 2; // For stereo (left and right eye)
+                rtDesc.vrUsage = VRTextureUsage.TwoEyes;
+            }
+            
+            m_CommandBuffer.GetTemporaryRT(GaussianSplatRenderer.Props.GaussianSplatRT, rtDesc);
             m_CommandBuffer.SetRenderTarget(GaussianSplatRenderer.Props.GaussianSplatRT, BuiltinRenderTextureType.CurrentActive);
             m_CommandBuffer.ClearRenderTarget(RTClearFlags.Color, new Color(0, 0, 0, 0), 0, 0);
 
@@ -205,6 +240,12 @@ namespace GaussianSplatting.Runtime
             // compose
             m_CommandBuffer.BeginSample(s_ProfCompose);
             m_CommandBuffer.SetRenderTarget(BuiltinRenderTextureType.CameraTarget);
+            m_CommandBuffer.SetGlobalInteger(GaussianSplatRenderer.Props.IsStereoEnabled, m_IsSinglePassStereo ? 1 : 0);
+            
+            // Set stereo convergence consistently with our other methods
+            float convergenceValue = XRSettings.enabled ? 0.05f : 0.0f;
+            m_CommandBuffer.SetGlobalFloat(GaussianSplatRenderer.Props.StereoConvergence, convergenceValue);
+            
             m_CommandBuffer.DrawProcedural(Matrix4x4.identity, matComposite, 0, MeshTopology.Triangles, 3, 1);
             m_CommandBuffer.EndSample(s_ProfCompose);
             m_CommandBuffer.ReleaseTemporaryRT(GaussianSplatRenderer.Props.GaussianSplatRT);
@@ -315,6 +356,10 @@ namespace GaussianSplatting.Runtime
             public static readonly int DstBuffer = Shader.PropertyToID("_DstBuffer");
             public static readonly int BufferSize = Shader.PropertyToID("_BufferSize");
             public static readonly int MatrixMV = Shader.PropertyToID("_MatrixMV");
+            public static readonly int MatrixMVLeft = Shader.PropertyToID("_MatrixMVLeft");
+            public static readonly int MatrixMVRight = Shader.PropertyToID("_MatrixMVRight");
+            public static readonly int MatrixProjLeft = Shader.PropertyToID("_MatrixProjLeft");
+            public static readonly int MatrixProjRight = Shader.PropertyToID("_MatrixProjRight");
             public static readonly int MatrixObjectToWorld = Shader.PropertyToID("_MatrixObjectToWorld");
             public static readonly int MatrixWorldToObject = Shader.PropertyToID("_MatrixWorldToObject");
             public static readonly int VecScreenParams = Shader.PropertyToID("_VecScreenParams");
@@ -328,6 +373,8 @@ namespace GaussianSplatting.Runtime
             public static readonly int SelectionMode = Shader.PropertyToID("_SelectionMode");
             public static readonly int SplatPosMouseDown = Shader.PropertyToID("_SplatPosMouseDown");
             public static readonly int SplatOtherMouseDown = Shader.PropertyToID("_SplatOtherMouseDown");
+            public static readonly int IsStereoEnabled = Shader.PropertyToID("_IsStereoEnabled");
+            public static readonly int StereoConvergence = Shader.PropertyToID("_StereoConvergence");
         }
 
         [field: NonSerialized] public bool editModified { get; private set; }
@@ -344,6 +391,7 @@ namespace GaussianSplatting.Runtime
             SetIndices,
             CalcDistances,
             CalcViewData,
+            CalcStereoViewData,
             UpdateEditData,
             InitEditData,
             ClearBuffer,
@@ -368,7 +416,7 @@ namespace GaussianSplatting.Runtime
             m_Asset.colorData != null;
         public bool HasValidRenderSetup => m_GpuPosData != null && m_GpuOtherData != null && m_GpuChunks != null;
 
-        const int kGpuViewDataSize = 40;
+        const int kGpuViewDataSize = 56;
 
         void CreateResourcesForAsset()
         {
@@ -487,7 +535,8 @@ namespace GaussianSplatting.Runtime
         void SetAssetDataOnCS(CommandBuffer cmb, KernelIndices kernel)
         {
             ComputeShader cs = m_CSSplatUtilities;
-            int kernelIndex = (int) kernel;
+            string kernelName = "CS" + kernel.ToString();
+            int kernelIndex = cs.FindKernel(kernelName);
             cmb.SetComputeBufferParam(cs, kernelIndex, Props.SplatPos, m_GpuPosData);
             cmb.SetComputeBufferParam(cs, kernelIndex, Props.SplatChunks, m_GpuChunks);
             cmb.SetComputeBufferParam(cs, kernelIndex, Props.SplatOther, m_GpuOtherData);
@@ -583,6 +632,7 @@ namespace GaussianSplatting.Runtime
 
             var tr = transform;
 
+            // Get view matrix directly without modification
             Matrix4x4 matView = cam.worldToCameraMatrix;
             Matrix4x4 matO2W = tr.localToWorldMatrix;
             Matrix4x4 matW2O = tr.worldToLocalMatrix;
@@ -604,9 +654,64 @@ namespace GaussianSplatting.Runtime
             cmb.SetComputeFloatParam(m_CSSplatUtilities, Props.SplatOpacityScale, m_OpacityScale);
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHOrder, m_SHOrder);
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHOnly, m_SHOnly ? 1 : 0);
+            cmb.SetComputeIntParam(m_CSSplatUtilities, Props.IsStereoEnabled, 0);
+            cmb.SetComputeFloatParam(m_CSSplatUtilities, Props.StereoConvergence, 0.0f);
 
-            m_CSSplatUtilities.GetKernelThreadGroupSizes((int)KernelIndices.CalcViewData, out uint gsX, out _, out _);
-            cmb.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.CalcViewData, (m_GpuView.count + (int)gsX - 1)/(int)gsX, 1, 1);
+            int calcViewDataKernel = m_CSSplatUtilities.FindKernel("CSCalcViewData");
+            m_CSSplatUtilities.GetKernelThreadGroupSizes(calcViewDataKernel, out uint gsX, out _, out _);
+            cmb.DispatchCompute(m_CSSplatUtilities, calcViewDataKernel, (m_GpuView.count + (int)gsX - 1)/(int)gsX, 1, 1);
+        }
+
+        internal void CalcStereoViewData(CommandBuffer cmb, Camera cam)
+        {
+            if (cam.cameraType == CameraType.Preview)
+                return;
+
+            var tr = transform;
+
+            Matrix4x4 matO2W = tr.localToWorldMatrix;
+            Matrix4x4 matW2O = tr.worldToLocalMatrix;
+            int screenW = cam.pixelWidth, screenH = cam.pixelHeight;
+            int eyeW = XRSettings.eyeTextureWidth, eyeH = XRSettings.eyeTextureHeight;
+            Vector4 screenPar = new Vector4(eyeW != 0 ? eyeW : screenW, eyeH != 0 ? eyeH : screenH, 0, 0);
+            Vector4 camPos = cam.transform.position;
+
+            // Get left and right eye matrices
+            Matrix4x4[] stereoViewMatrices = new Matrix4x4[2];
+            Matrix4x4[] stereoProjMatrices = new Matrix4x4[2];
+            
+            // Get view matrices directly without modification to preserve platform-specific conventions
+            stereoViewMatrices[0] = cam.GetStereoViewMatrix(Camera.StereoscopicEye.Left);
+            stereoViewMatrices[1] = cam.GetStereoViewMatrix(Camera.StereoscopicEye.Right);
+            stereoProjMatrices[0] = cam.GetStereoProjectionMatrix(Camera.StereoscopicEye.Left);
+            stereoProjMatrices[1] = cam.GetStereoProjectionMatrix(Camera.StereoscopicEye.Right);
+
+            // calculate view dependent data for each splat
+            SetAssetDataOnCS(cmb, KernelIndices.CalcStereoViewData);
+
+            // Set matrices for both eyes
+            cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.MatrixMVLeft, stereoViewMatrices[0] * matO2W);
+            cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.MatrixMVRight, stereoViewMatrices[1] * matO2W);
+            cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.MatrixProjLeft, stereoProjMatrices[0]);
+            cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.MatrixProjRight, stereoProjMatrices[1]);
+            cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.MatrixObjectToWorld, matO2W);
+            cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.MatrixWorldToObject, matW2O);
+
+            cmb.SetComputeVectorParam(m_CSSplatUtilities, Props.VecScreenParams, screenPar);
+            cmb.SetComputeVectorParam(m_CSSplatUtilities, Props.VecWorldSpaceCameraPos, camPos);
+            cmb.SetComputeFloatParam(m_CSSplatUtilities, Props.SplatScale, m_SplatScale);
+            cmb.SetComputeFloatParam(m_CSSplatUtilities, Props.SplatOpacityScale, m_OpacityScale);
+            cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHOrder, m_SHOrder);
+            cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHOnly, m_SHOnly ? 1 : 0);
+            cmb.SetComputeIntParam(m_CSSplatUtilities, Props.IsStereoEnabled, 1);
+            
+            // Adjust stereo convergence value for better cross-platform compatibility
+            float convergenceValue = XRSettings.enabled ? 0.05f : 0.0f;
+            cmb.SetComputeFloatParam(m_CSSplatUtilities, Props.StereoConvergence, convergenceValue);
+
+            int calcStereoViewDataKernel = m_CSSplatUtilities.FindKernel("CSCalcStereoViewData");
+            m_CSSplatUtilities.GetKernelThreadGroupSizes(calcStereoViewDataKernel, out uint gsX, out _, out _);
+            cmb.DispatchCompute(m_CSSplatUtilities, calcStereoViewDataKernel, (m_GpuView.count + (int)gsX - 1)/(int)gsX, 1, 1);
         }
 
         internal void SortPoints(CommandBuffer cmd, Camera cam, Matrix4x4 matrix)
@@ -621,16 +726,17 @@ namespace GaussianSplatting.Runtime
 
             // calculate distance to the camera for each splat
             cmd.BeginSample(s_ProfSort);
-            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcDistances, Props.SplatSortDistances, m_GpuSortDistances);
-            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcDistances, Props.SplatSortKeys, m_GpuSortKeys);
-            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcDistances, Props.SplatChunks, m_GpuChunks);
-            cmd.SetComputeBufferParam(m_CSSplatUtilities, (int)KernelIndices.CalcDistances, Props.SplatPos, m_GpuPosData);
+            int calcDistancesKernel = m_CSSplatUtilities.FindKernel("CSCalcDistances");
+            cmd.SetComputeBufferParam(m_CSSplatUtilities, calcDistancesKernel, Props.SplatSortDistances, m_GpuSortDistances);
+            cmd.SetComputeBufferParam(m_CSSplatUtilities, calcDistancesKernel, Props.SplatSortKeys, m_GpuSortKeys);
+            cmd.SetComputeBufferParam(m_CSSplatUtilities, calcDistancesKernel, Props.SplatChunks, m_GpuChunks);
+            cmd.SetComputeBufferParam(m_CSSplatUtilities, calcDistancesKernel, Props.SplatPos, m_GpuPosData);
             cmd.SetComputeIntParam(m_CSSplatUtilities, Props.SplatFormat, (int)m_Asset.posFormat);
             cmd.SetComputeMatrixParam(m_CSSplatUtilities, Props.MatrixMV, worldToCamMatrix * matrix);
             cmd.SetComputeIntParam(m_CSSplatUtilities, Props.SplatCount, m_SplatCount);
             cmd.SetComputeIntParam(m_CSSplatUtilities, Props.SplatChunkCount, m_GpuChunksValid ? m_GpuChunks.count : 0);
-            m_CSSplatUtilities.GetKernelThreadGroupSizes((int)KernelIndices.CalcDistances, out uint gsX, out _, out _);
-            cmd.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.CalcDistances, (m_GpuSortDistances.count + (int)gsX - 1)/(int)gsX, 1, 1);
+            m_CSSplatUtilities.GetKernelThreadGroupSizes(calcDistancesKernel, out uint gsX, out _, out _);
+            cmd.DispatchCompute(m_CSSplatUtilities, calcDistancesKernel, (m_GpuSortDistances.count + (int)gsX - 1)/(int)gsX, 1, 1);
 
             // sort the splats
             EnsureSorterAndRegister();
@@ -681,19 +787,21 @@ namespace GaussianSplatting.Runtime
 
         void ClearGraphicsBuffer(GraphicsBuffer buf)
         {
-            m_CSSplatUtilities.SetBuffer((int)KernelIndices.ClearBuffer, Props.DstBuffer, buf);
+            int clearBufferKernel = m_CSSplatUtilities.FindKernel("CSClearBuffer");
+            m_CSSplatUtilities.SetBuffer(clearBufferKernel, Props.DstBuffer, buf);
             m_CSSplatUtilities.SetInt(Props.BufferSize, buf.count);
-            m_CSSplatUtilities.GetKernelThreadGroupSizes((int)KernelIndices.ClearBuffer, out uint gsX, out _, out _);
-            m_CSSplatUtilities.Dispatch((int)KernelIndices.ClearBuffer, (int)((buf.count+gsX-1)/gsX), 1, 1);
+            m_CSSplatUtilities.GetKernelThreadGroupSizes(clearBufferKernel, out uint gsX, out _, out _);
+            m_CSSplatUtilities.Dispatch(clearBufferKernel, (int)((buf.count+gsX-1)/gsX), 1, 1);
         }
 
         void UnionGraphicsBuffers(GraphicsBuffer dst, GraphicsBuffer src)
         {
-            m_CSSplatUtilities.SetBuffer((int)KernelIndices.OrBuffers, Props.SrcBuffer, src);
-            m_CSSplatUtilities.SetBuffer((int)KernelIndices.OrBuffers, Props.DstBuffer, dst);
+            int orBuffersKernel = m_CSSplatUtilities.FindKernel("CSOrBuffers");
+            m_CSSplatUtilities.SetBuffer(orBuffersKernel, Props.SrcBuffer, src);
+            m_CSSplatUtilities.SetBuffer(orBuffersKernel, Props.DstBuffer, dst);
             m_CSSplatUtilities.SetInt(Props.BufferSize, dst.count);
-            m_CSSplatUtilities.GetKernelThreadGroupSizes((int)KernelIndices.OrBuffers, out uint gsX, out _, out _);
-            m_CSSplatUtilities.Dispatch((int)KernelIndices.OrBuffers, (int)((dst.count+gsX-1)/gsX), 1, 1);
+            m_CSSplatUtilities.GetKernelThreadGroupSizes(orBuffersKernel, out uint gsX, out _, out _);
+            m_CSSplatUtilities.Dispatch(orBuffersKernel, (int)((dst.count+gsX-1)/gsX), 1, 1);
         }
 
         static float SortableUintToFloat(uint v)
@@ -714,8 +822,9 @@ namespace GaussianSplatting.Runtime
                 return;
             }
 
-            m_CSSplatUtilities.SetBuffer((int)KernelIndices.InitEditData, Props.DstBuffer, m_GpuEditCountsBounds);
-            m_CSSplatUtilities.Dispatch((int)KernelIndices.InitEditData, 1, 1, 1);
+            int initEditDataKernel = m_CSSplatUtilities.FindKernel("CSInitEditData");
+            m_CSSplatUtilities.SetBuffer(initEditDataKernel, Props.DstBuffer, m_GpuEditCountsBounds);
+            m_CSSplatUtilities.Dispatch(initEditDataKernel, 1, 1, 1);
 
             using CommandBuffer cmb = new CommandBuffer();
             SetAssetDataOnCS(cmb, KernelIndices.UpdateEditData);
@@ -1049,7 +1158,10 @@ namespace GaussianSplatting.Runtime
         {
             if (!EnsureEditingBuffers()) return;
 
+            // Calculate the transformation matrix between source and destination objects
             Matrix4x4 copyMatrix = dstTransform.worldToLocalMatrix * transform.localToWorldMatrix;
+            
+            // Extract rotation and scale directly from the matrix to ensure consistent behavior
             Quaternion copyRot = copyMatrix.rotation;
             Vector3 copyScale = copyMatrix.lossyScale;
 

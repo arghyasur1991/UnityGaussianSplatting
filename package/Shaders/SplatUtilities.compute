@@ -4,6 +4,7 @@
 #pragma kernel CSSetIndices
 #pragma kernel CSCalcDistances
 #pragma kernel CSCalcViewData
+#pragma kernel CSCalcStereoViewData
 #pragma kernel CSUpdateEditData
 #pragma kernel CSInitEditData
 #pragma kernel CSClearBuffer
@@ -40,9 +41,18 @@
 float4x4 _MatrixObjectToWorld;
 float4x4 _MatrixWorldToObject;
 float4x4 _MatrixMV;
+float4x4 _MatrixMVLeft;
+float4x4 _MatrixMVRight;
+float4x4 _MatrixProjLeft;
+float4x4 _MatrixProjRight;
 float4 _VecScreenParams;
 float4 _VecWorldSpaceCameraPos;
 int _SelectionMode;
+// Define _IsStereoEnabled with a guard to prevent redefinition
+#ifndef _ISSTENABLED_DEFINED
+#define _ISSTENABLED_DEFINED
+uint _IsStereoEnabled;
+#endif
 
 RWStructuredBuffer<uint> _SplatSortDistances;
 RWStructuredBuffer<uint> _SplatSortKeys;
@@ -235,7 +245,11 @@ void CSCalcViewData (uint3 id : SV_DispatchThreadID)
         cov3d1 *= splatScale2;
         float3 cov2d = CalcCovariance2D(splat.pos, cov3d0, cov3d1, _MatrixMV, UNITY_MATRIX_P, _VecScreenParams);
         
-        DecomposeCovariance(cov2d, view.axis1, view.axis2);
+        // Fix for Vulkan - store in temporary variables first
+        float2 axis1Temp, axis2Temp;
+        DecomposeCovariance(cov2d, axis1Temp, axis2Temp);
+        view.axis1 = float4(axis1Temp.x, axis1Temp.y, 0, 0);
+        view.axis2 = float4(axis2Temp.x, axis2Temp.y, 0, 0);
 
         float3 worldViewDir = _VecWorldSpaceCameraPos.xyz - centerWorldPos;
         float3 objViewDir = mul((float3x3)_MatrixWorldToObject, worldViewDir);
@@ -244,13 +258,91 @@ void CSCalcViewData (uint3 id : SV_DispatchThreadID)
         half4 col;
         col.rgb = ShadeSH(splat.sh, objViewDir, _SHOrder, _SHOnly != 0);
         col.a = min(splat.opacity * opacityScale, 65000);
-        view.color.x = (f32tof16(col.r) << 16) | f32tof16(col.g);
-        view.color.y = (f32tof16(col.b) << 16) | f32tof16(col.a);
+        view.color = (f32tof16(col.r) << 16) | f32tof16(col.g);
+        view.color2 = (f32tof16(col.b) << 16) | f32tof16(col.a);
     }
     
     _SplatViewData[idx] = view;
 }
 
+// Add stereo view calculations
+[numthreads(GROUP_SIZE,1,1)]
+void CSCalcStereoViewData (uint3 id : SV_DispatchThreadID)
+{
+    uint idx = id.x;
+    if (idx >= _SplatCount)
+        return;
+
+    SplatData splat = LoadSplatData(idx);
+    SplatViewData view = (SplatViewData)0;
+    
+    float3 centerWorldPos = mul(_MatrixObjectToWorld, float4(splat.pos,1)).xyz;
+    
+    // Calculate for both eyes in single pass stereo mode
+    // First eye (left)
+    float4 centerClipPosLeft = mul(UNITY_MATRIX_VP, float4(centerWorldPos, 1));
+    bool behindCamLeft = centerClipPosLeft.w <= 0;
+
+    // Second eye (right)
+    float4 centerClipPosRight = mul(mul(_MatrixProjRight, _MatrixMVRight), float4(centerWorldPos, 1));
+    bool behindCamRight = centerClipPosRight.w <= 0;
+    
+    // Use left eye for calculation (shader will handle right eye in vertex shader)
+    float4 centerClipPos = centerClipPosLeft;
+    bool behindCam = behindCamLeft || behindCamRight;
+    
+    if (behindCam)
+    {
+        view.pos = asfloat(0x7fc00000); // NaN discards the primitive
+    }
+    else
+    {
+        view.pos = centerClipPos;
+        
+        // Get 3D covariance matrix in world space
+        float3 scale3D = splat.scale;
+        float3x3 rotMat = CalcMatrixFromRotationScale(splat.rot, scale3D);
+        float3 sigma0, sigma1;
+        CalcCovariance3D(rotMat, sigma0, sigma1);
+        
+        // Project 3D covariance to screen space
+        // Calculate for both left and right eyes
+        float3 cov2dLeft = CalcCovariance2D(centerWorldPos, sigma0, sigma1, _MatrixMVLeft, _MatrixProjLeft, _VecScreenParams);
+        float3 cov2dRight = CalcCovariance2D(centerWorldPos, sigma0, sigma1, _MatrixMVRight, _MatrixProjRight, _VecScreenParams);
+        
+        // Use left eye data as primary (right eye handled in shader)
+        float3 cov2d = cov2dLeft;
+        
+        // Compute screen-space minor and major axis for both eyes
+        float2 axisLeft1, axisLeft2;
+        DecomposeCovariance(cov2dLeft, axisLeft1, axisLeft2);
+        
+        float2 axisRight1, axisRight2;
+        DecomposeCovariance(cov2dRight, axisRight1, axisRight2);
+        
+        // Store all data packed together
+        view.axis1 = float4(axisLeft1.x, axisLeft1.y, axisRight1.x, axisRight1.y);
+        view.axis2 = float4(axisLeft2.x, axisLeft2.y, axisRight2.x, axisRight2.y);
+        
+        // Compute SH color
+        float3 cameraDir = normalize(_VecWorldSpaceCameraPos - centerWorldPos);
+        float3 cameraDirObj = mul((float3x3)_MatrixWorldToObject, cameraDir);
+        
+        // Apply sphere harmonics - with explicit temporary variable for safety
+        SplatSHData shData = (SplatSHData)0;
+        shData = ComputeSplatSH(splat, _SHOrder, _SHOnly);
+        
+        half3 shColor = ShadeSH(shData, cameraDirObj, _SHOrder, _SHOnly);
+        
+        // clamp opacity and pre-multiply color
+        float opacity = min(1.0, splat.opacity * _SplatOpacityScale);
+        view.color = PackTwo16BitFloatsInUint(half_to_float16(shColor.r), half_to_float16(shColor.g));
+        view.color2 = PackTwo16BitFloatsInUint(half_to_float16(shColor.b), half_to_float16(opacity));
+    }
+    
+    // Store the same data for both eyes
+    _SplatViewData[idx] = view;
+}
 
 RWByteAddressBuffer _DstBuffer;
 ByteAddressBuffer _SrcBuffer;
