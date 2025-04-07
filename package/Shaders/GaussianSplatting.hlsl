@@ -715,13 +715,9 @@ bool IsStereoEnabled()
     // In compute shaders, we only check the flag
     return _IsStereoEnabled > 0;
 #else
-    // In regular shaders, we can use available stereo indicators
-    // Important: only one stereo mode should be active at a time based on our multi_compile setup
-    #if defined(STEREO_MULTIVIEW_ON)
-        // For multiview (Quest), we're always in stereo if the flag is set
-        return _IsStereoEnabled > 0;
-    #elif defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_SINGLE_PASS_STEREO) || defined(STEREO_INSTANCING_ON)
-        // For other stereo modes, check stereo flag
+    // In regular shaders, we use available stereo indicators plus our app flag
+    #if defined(STEREO_MULTIVIEW_ON) || defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_SINGLE_PASS_STEREO)
+        // For any stereo mode, check if the app has enabled stereo rendering
         return _IsStereoEnabled > 0;
     #else
         return false;
@@ -737,15 +733,14 @@ float4 GetEyeSpacePosition(SplatViewData view)
 #ifndef SHADER_STAGE_COMPUTE
     // For right eye in stereo mode, adjust the position
     #if defined(STEREO_MULTIVIEW_ON)
-        // For multiview (Quest), we use unity_StereoEyeIndex
-        // Important: Don't try to modify gl_ViewID which is read-only
-        if (IsStereoEnabled() && unity_StereoEyeIndex == 1)
+        // Quest multiview mode - use unity_StereoEyeIndex
+        if (IsStereoEnabled() && unity_StereoEyeIndex > 0)
         {
             pos.x += _StereoConvergence;
         }
-    #elif defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_SINGLE_PASS_STEREO) || defined(STEREO_INSTANCING_ON)
-        // For other stereo modes use unity_StereoEyeIndex
-        if (IsStereoEnabled() && unity_StereoEyeIndex == 1)
+    #elif defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_SINGLE_PASS_STEREO)
+        // Other stereo modes - use unity_StereoEyeIndex
+        if (IsStereoEnabled() && unity_StereoEyeIndex > 0)
         {
             pos.x += _StereoConvergence;
         }

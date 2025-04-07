@@ -53,15 +53,19 @@ CGPROGRAM
 
 StructuredBuffer<uint> _OrderBuffer;
 // Platform-specific texture declarations
-#if defined(SHADER_API_MOBILE) || defined(SHADER_API_GLES3) || defined(SHADER_API_GLES) || defined(SHADER_API_VULKAN) || defined(SHADER_API_METAL)
-// Mobile platforms use standard 2D textures
-sampler2D _GaussianSplatRT;
+// IMPORTANT: For Quest (multiview), we MUST use texture arrays even on mobile platforms
+#if defined(STEREO_MULTIVIEW_ON)
+    // When using multiview (Quest), we need texture arrays for stereo rendering
+    UNITY_DECLARE_TEX2DARRAY(_GaussianSplatRT);
+#elif defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_SINGLE_PASS_STEREO)
+    // For other stereo modes, use texture arrays as well
+    UNITY_DECLARE_TEX2DARRAY(_GaussianSplatRT);
+#elif defined(SHADER_API_MOBILE) || defined(SHADER_API_GLES3) || defined(SHADER_API_GLES) || defined(SHADER_API_VULKAN) || defined(SHADER_API_METAL)
+    // Mobile platforms use standard 2D textures when not in stereo mode
+    sampler2D _GaussianSplatRT;
 #else
-// Desktop platforms use array textures for stereo
-UNITY_DECLARE_SCREENSPACE_TEXTURE(_GaussianSplatRT);
-#if defined(STEREO_MULTIVIEW_ON) || defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_SINGLE_PASS_STEREO) || defined(STEREO_INSTANCING_ON)
-UNITY_DECLARE_TEX2DARRAY(_GaussianSplatRT);
-#endif
+    // Desktop platforms use screen space textures for non-stereo
+    UNITY_DECLARE_SCREENSPACE_TEXTURE(_GaussianSplatRT);
 #endif
 float4 _GaussianSplatRT_TexelSize;
 float _SplasPerBatch;
@@ -96,12 +100,10 @@ v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
     // Get the appropriate position for the current eye
     float4 centerClipPos = view.pos;
     
+    // Always use unity_StereoEyeIndex for eye identification
     uint eyeIndex = 0;
-    // Safe way to get eye index without trying to modify gl_ViewID
-    #if defined(STEREO_MULTIVIEW_ON)
-    eyeIndex = unity_StereoEyeIndex;
-    #elif defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_SINGLE_PASS_STEREO) || defined(STEREO_INSTANCING_ON)
-    eyeIndex = unity_StereoEyeIndex;
+    #if defined(STEREO_MULTIVIEW_ON) || defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_SINGLE_PASS_STEREO)
+        eyeIndex = unity_StereoEyeIndex;
     #endif
     
     bool behindCam = centerClipPos.w <= 0;
@@ -140,23 +142,25 @@ v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
         
         // For stereo rendering, adjust the center position based on eye index
         #if defined(STEREO_MULTIVIEW_ON)
-        if (_IsStereoEnabled && eyeIndex == 1)
-        {
-            // Simply add stereo convergence offset for right eye
-            centerClipPos.x += _StereoSeparation;
-        }
-        #elif defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_SINGLE_PASS_STEREO) || defined(STEREO_INSTANCING_ON)
-        if (_IsStereoEnabled && eyeIndex == 1)
-        {
-            // Need to convert to right eye position
-            float4 rightEyePos = UnityObjectToClipPos(
-                mul(unity_WorldToObject, 
-                    mul(unity_StereoCameraToWorld[1], 
-                        mul(unity_StereoCameraInvProjection[1], 
-                            float4(0, 0, -1, 1)))));
-                            
-            centerClipPos = rightEyePos;
-        }
+            if (_IsStereoEnabled && eyeIndex > 0)
+            {
+                // For Quest multiview, use a simple convergence offset
+                // This is handled differently from other stereo modes because 
+                // the view and projection matrices are automatically set by the runtime
+                centerClipPos.x += _StereoSeparation;
+            }
+        #elif defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_SINGLE_PASS_STEREO)
+            if (_IsStereoEnabled && eyeIndex > 0)
+            {
+                // Need to convert to right eye position using Unity's stereo matrices
+                float4 rightEyePos = UnityObjectToClipPos(
+                    mul(unity_WorldToObject, 
+                        mul(unity_StereoCameraToWorld[eyeIndex], 
+                            mul(unity_StereoCameraInvProjection[eyeIndex], 
+                                float4(0, 0, -1, 1)))));
+                                
+                centerClipPos = rightEyePos;
+            }
         #endif
         
         o.vertex = centerClipPos;

@@ -62,15 +62,19 @@ uint _IsStereoEnabled;
 #endif
 
 // Platform-specific texture declarations
-#if defined(SHADER_API_MOBILE) || defined(SHADER_API_GLES3) || defined(SHADER_API_GLES) || defined(SHADER_API_VULKAN) || defined(SHADER_API_METAL)
-// Mobile platforms use standard 2D textures
-sampler2D _GaussianSplatRT;
+// IMPORTANT: For Quest (multiview), we MUST use texture arrays even on mobile platforms
+#if defined(STEREO_MULTIVIEW_ON)
+    // When using multiview (Quest), we need texture arrays for stereo rendering
+    UNITY_DECLARE_TEX2DARRAY(_GaussianSplatRT);
+#elif defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_SINGLE_PASS_STEREO)
+    // For other stereo modes, use texture arrays as well
+    UNITY_DECLARE_TEX2DARRAY(_GaussianSplatRT);
+#elif defined(SHADER_API_MOBILE) || defined(SHADER_API_GLES3) || defined(SHADER_API_GLES) || defined(SHADER_API_VULKAN) || defined(SHADER_API_METAL)
+    // Mobile platforms use standard 2D textures when not in stereo mode
+    sampler2D _GaussianSplatRT;
 #else
-// Desktop platforms use array textures for stereo
-UNITY_DECLARE_SCREENSPACE_TEXTURE(_GaussianSplatRT);
-#if defined(STEREO_MULTIVIEW_ON) || defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_SINGLE_PASS_STEREO) || defined(STEREO_INSTANCING_ON)
-UNITY_DECLARE_TEX2DARRAY(_GaussianSplatRT);
-#endif
+    // Desktop platforms use screen space textures for non-stereo
+    UNITY_DECLARE_SCREENSPACE_TEXTURE(_GaussianSplatRT);
 #endif
 
 v2f vert (uint vtxID : SV_VertexID)
@@ -95,20 +99,31 @@ half4 frag (v2f i) : SV_Target
     // Handle stereo rendering with platform-specific sampling
     if (_IsStereoEnabled)
     {
-        #if defined(SHADER_API_MOBILE) || defined(SHADER_API_GLES3) || defined(SHADER_API_GLES) || defined(SHADER_API_VULKAN) || defined(SHADER_API_METAL)
-            // Mobile platforms - use standard texture sampling
+        #if defined(STEREO_MULTIVIEW_ON)
+            // Quest multiview mode - MUST use texture array with eye index
+            col = UNITY_SAMPLE_TEX2DARRAY(_GaussianSplatRT, float3(i.uv, unity_StereoEyeIndex));
+        #elif defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_SINGLE_PASS_STEREO)
+            // Other stereo modes - use texture array with eye index
+            col = UNITY_SAMPLE_TEX2DARRAY(_GaussianSplatRT, float3(i.uv, unity_StereoEyeIndex));
+        #elif defined(SHADER_API_MOBILE)
+            // Mobile platforms in mono mode - use standard texture
             col = tex2D(_GaussianSplatRT, i.uv);
         #else
-            // Desktop platforms - use array texture for stereo
-            col = tex2DArray(_GaussianSplatRT, float3(i.uv, unity_StereoEyeIndex));
+            // Desktop platforms - use standard texture sampling
+            col = UNITY_SAMPLE_SCREENSPACE_TEXTURE(_GaussianSplatRT, i.uv);
         #endif
     }
     else
     {
         // Standard non-stereo sampling
-        #if defined(SHADER_API_MOBILE) || defined(SHADER_API_GLES3) || defined(SHADER_API_GLES) || defined(SHADER_API_VULKAN) || defined(SHADER_API_METAL)
+        #if defined(SHADER_API_MOBILE) && !defined(STEREO_MULTIVIEW_ON) && !defined(UNITY_STEREO_INSTANCING_ENABLED) && !defined(UNITY_SINGLE_PASS_STEREO)
+            // Mobile non-stereo
             col = tex2D(_GaussianSplatRT, i.uv);
+        #elif defined(STEREO_MULTIVIEW_ON) || defined(UNITY_STEREO_INSTANCING_ENABLED) || defined(UNITY_SINGLE_PASS_STEREO)
+            // In stereo mode but stereo disabled in app - still need to sample from the array
+            col = UNITY_SAMPLE_TEX2DARRAY(_GaussianSplatRT, float3(i.uv, 0));
         #else
+            // Desktop non-stereo
             col = UNITY_SAMPLE_SCREENSPACE_TEXTURE(_GaussianSplatRT, i.uv);
         #endif
     }

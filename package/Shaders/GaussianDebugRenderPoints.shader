@@ -38,6 +38,9 @@ CGPROGRAM
 #include "UnityCG.cginc"
 #include "GaussianSplatting.hlsl"
 
+// Multiview is already handled in GaussianSplatting.hlsl
+// No need to declare UNITY_DECLARE_MULTIVIEW here to avoid gl_ViewID redefinition
+
 struct v2f
 {
     half3 color : TEXCOORD0;
@@ -54,6 +57,8 @@ v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
     v2f o;
     UNITY_INITIALIZE_OUTPUT(v2f, o);
     UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(o);
+    
+    // We're using SV_InstanceID directly, no need for UNITY_SETUP_INSTANCE_ID
     
     uint splatIndex = instID;
 

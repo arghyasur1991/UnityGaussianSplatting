@@ -43,6 +43,9 @@ StructuredBuffer<uint> _OrderBuffer;
 
 bool _DisplayChunks;
 
+// Multiview is already handled in GaussianSplatting.hlsl
+// No need to declare UNITY_DECLARE_MULTIVIEW here to avoid gl_ViewID redefinition
+
 struct v2f
 {
     half4 col : COLOR0;
@@ -65,6 +68,8 @@ v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
     v2f o;
     UNITY_INITIALIZE_OUTPUT(v2f, o);
     UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(o);
+    
+    // We're using SV_InstanceID directly, no need for UNITY_SETUP_INSTANCE_ID
     
     bool chunks = _DisplayChunks;
 	uint idx = vtxID;
