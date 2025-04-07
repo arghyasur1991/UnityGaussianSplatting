@@ -733,7 +733,7 @@ float4 GetEyeSpacePosition(SplatViewData view)
 #ifndef SHADER_STAGE_COMPUTE
     // For right eye in stereo mode, adjust the position
     #if defined(STEREO_MULTIVIEW_ON)
-        // Quest multiview mode - use unity_StereoEyeIndex
+        // For multiview (Quest), use unity_StereoEyeIndex
         if (IsStereoEnabled() && unity_StereoEyeIndex > 0)
         {
             pos.x += _StereoConvergence;

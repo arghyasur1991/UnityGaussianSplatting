@@ -248,6 +248,7 @@ void CSCalcViewData (uint3 id : SV_DispatchThreadID)
         // Fix for Vulkan - store in temporary variables first
         float2 axis1Temp, axis2Temp;
         DecomposeCovariance(cov2d, axis1Temp, axis2Temp);
+        
         view.axis1 = float4(axis1Temp.x, axis1Temp.y, 0, 0);
         view.axis2 = float4(axis2Temp.x, axis2Temp.y, 0, 0);
 
@@ -287,8 +288,7 @@ void CSCalcStereoViewData (uint3 id : SV_DispatchThreadID)
     float4 centerClipPosRight = mul(mul(_MatrixProjRight, _MatrixMVRight), float4(centerWorldPos, 1));
     bool behindCamRight = centerClipPosRight.w <= 0;
     
-    // Use left eye for calculation (shader will handle right eye in vertex shader)
-    float4 centerClipPos = centerClipPosLeft;
+    // Store world position to allow proper multiview transformation
     bool behindCam = behindCamLeft || behindCamRight;
     
     if (behindCam)
@@ -297,7 +297,7 @@ void CSCalcStereoViewData (uint3 id : SV_DispatchThreadID)
     }
     else
     {
-        view.pos = centerClipPos;
+        view.pos = centerClipPosLeft;
         
         // Get 3D covariance matrix in world space
         float3 scale3D = splat.scale;
