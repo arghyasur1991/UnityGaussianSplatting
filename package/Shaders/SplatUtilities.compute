@@ -47,6 +47,7 @@
 float4x4 _MatrixObjectToWorld;
 float4x4 _MatrixWorldToObject;
 float4x4 _MatrixMV;
+float4x4 UNITY_MATRIX_VP;
 float4 _VecScreenParams;
 float4 _VecWorldSpaceCameraPos;
 int _SelectionMode;
@@ -139,6 +140,7 @@ RWStructuredBuffer<SplatViewData> _SplatViewData;
 
 float _SplatScale;
 float _SplatOpacityScale;
+float _QScale = 1.0f; // Default scale factor for splat quads
 uint _SHOrder;
 uint _SHOnly;
 
@@ -174,6 +176,9 @@ struct Covariance
 {
     float3 vals[3];
 };
+
+// Add structured buffer declaration for _Splats
+StructuredBuffer<Splat> _Splats;
 
 // Helper functions for eigendecomposition of covariance matrix
 // This is a more stable algorithm than before
@@ -502,7 +507,7 @@ void CSSelectionUpdate (uint3 id : SV_DispatchThreadID)
         return;
 
     float3 centerWorldPos = mul(_MatrixObjectToWorld, float4(pos,1)).xyz;
-    float4 centerClipPos = mul(UNITY_MATRIX_VP, float4(centerWorldPos, 1));
+    float4 centerClipPos = mul(_WorldToClipMatrix, float4(centerWorldPos, 1));
     bool behindCam = centerClipPos.w <= 0;
     if (behindCam)
         return;
@@ -917,7 +922,7 @@ void CSCalcStereoViewData(uint3 id : SV_DispatchThreadID)
     Splat splat = _Splats[i];
 
     // Convert from object to world space
-    float3 worldPos = mul(_ObjectToWorldMatrix, float4(splat.pos, 1.0)).xyz;
+    float3 worldPos = mul(_MatrixObjectToWorld, float4(splat.pos, 1.0)).xyz;
 
     // Transform to view space
     float3 quat = EulerToQuat(splat.rot);
@@ -1020,6 +1025,7 @@ void CSCalcStereoViewData(uint3 id : SV_DispatchThreadID)
     float scaleLeft;
     DecomposeCovariance(viewCovLeft, axis1Left, axis2Left, scaleLeft);
     
+    
     //-----------------------------------------------------------------------
     // RIGHT EYE covariance calculation
     //-----------------------------------------------------------------------
@@ -1068,7 +1074,7 @@ void CSCalcStereoViewData(uint3 id : SV_DispatchThreadID)
     DecomposeCovariance(viewCovRight, axis1Right, axis2Right, scaleRight);
 
     // Apply aspect ratio correction for both eyes
-    float2 wh = _ScreenParams.xy;
+    float2 wh = _VecScreenParams.xy;
     float aspect = wh.y / wh.x;
     
     // Store axes for LEFT eye

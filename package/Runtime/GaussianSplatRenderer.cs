@@ -302,6 +302,7 @@ namespace GaussianSplatting.Runtime
             public static readonly int OrderBuffer = Shader.PropertyToID("_OrderBuffer");
             public static readonly int SplatScale = Shader.PropertyToID("_SplatScale");
             public static readonly int SplatOpacityScale = Shader.PropertyToID("_SplatOpacityScale");
+            public static readonly int QScale = Shader.PropertyToID("_QScale");
             public static readonly int SplatSize = Shader.PropertyToID("_SplatSize");
             public static readonly int SplatCount = Shader.PropertyToID("_SplatCount");
             public static readonly int SHOrder = Shader.PropertyToID("_SHOrder");
@@ -640,6 +641,7 @@ namespace GaussianSplatting.Runtime
             cmb.SetComputeVectorParam(m_CSSplatUtilities, Props.VecWorldSpaceCameraPos, camPos);
             cmb.SetComputeFloatParam(m_CSSplatUtilities, Props.SplatScale, m_SplatScale);
             cmb.SetComputeFloatParam(m_CSSplatUtilities, Props.SplatOpacityScale, m_OpacityScale);
+            cmb.SetComputeFloatParam(m_CSSplatUtilities, Props.QScale, m_SplatScale);
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHOrder, m_SHOrder);
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHOnly, m_SHOnly ? 1 : 0);
 
@@ -703,6 +705,7 @@ namespace GaussianSplatting.Runtime
             
             cmd.SetComputeIntParam(m_CSSplatUtilities, Props.SplatCount, m_SplatCount);
             cmd.SetComputeIntParam(m_CSSplatUtilities, Props.SplatChunkCount, m_GpuChunksValid ? m_GpuChunks.count : 0);
+            cmd.SetComputeFloatParam(m_CSSplatUtilities, Props.QScale, m_SplatScale);
             m_CSSplatUtilities.GetKernelThreadGroupSizes((int)KernelIndices.CalcDistances, out uint gsX, out _, out _);
             cmd.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.CalcDistances, (m_GpuSortDistances.count + (int)gsX - 1)/(int)gsX, 1, 1);
 
