@@ -17,6 +17,11 @@ CGPROGRAM
 #pragma require compute
 #pragma use_dxc
 
+#include "UnityCG.cginc"
+
+// Support for stereo rendering - enable all stereo modes
+#pragma multi_compile_local _ UNITY_SINGLE_PASS_STEREO STEREO_INSTANCING_ON STEREO_MULTIVIEW_ON
+
 #include "GaussianSplatting.hlsl"
 
 StructuredBuffer<uint> _OrderBuffer;
@@ -26,15 +31,29 @@ struct v2f
     half4 col : COLOR0;
     float2 pos : TEXCOORD0;
     float4 vertex : SV_POSITION;
+    UNITY_VERTEX_OUTPUT_STEREO
+};
+
+struct appdata
+{
+    uint id : SV_VertexID;
+    uint instanceId : SV_InstanceID;
+    UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
 StructuredBuffer<SplatViewData> _SplatViewData;
 ByteAddressBuffer _SplatSelectedBits;
 uint _SplatBitsValid;
 
-v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
+v2f vert (appdata v)
 {
     v2f o = (v2f)0;
+    UNITY_SETUP_INSTANCE_ID(v);
+    UNITY_INITIALIZE_OUTPUT(v2f, o);
+    UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(o);
+    
+    uint vtxID = v.id;
+    uint instID = v.instanceId;
     instID = _OrderBuffer[instID];
 	SplatViewData view = _SplatViewData[instID];
 	float4 centerClipPos = view.pos;
@@ -100,6 +119,7 @@ half4 frag (v2f i) : SV_Target
 		i.col.rgb = lerp(i.col.rgb, selectedColor, 0.5);
 	}
 	
+    UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(i);
     if (alpha < 1.0/255.0)
         discard;
 
