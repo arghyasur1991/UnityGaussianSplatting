@@ -81,6 +81,13 @@ void CSCalcDistances (uint3 id : SV_DispatchThreadID)
     _SplatSortDistances[idx] = FloatToSortableUint(pos.z);
 }
 
+cbuffer StereoMatrices
+{
+    float4x4 _ViewProjMatrixLeft;
+    float4x4 _ViewProjMatrixRight;
+};
+StructuredBuffer<uint> _SplatEyeIndex; // 0 = left, 1 = right
+
 RWStructuredBuffer<SplatViewData> _SplatViewData;
 
 float _SplatScale;
@@ -195,9 +202,13 @@ void CSCalcViewData (uint3 id : SV_DispatchThreadID)
 
     SplatData splat = LoadSplatData(idx);
     SplatViewData view = (SplatViewData)0;
-    
+
+    uint index = id.x;
+    uint eyeIndex = _SplatEyeIndex[index];
+    float4x4 vpMatrix = (eyeIndex == 0) ? _ViewProjMatrixLeft : _ViewProjMatrixRight;
+
     float3 centerWorldPos = mul(_MatrixObjectToWorld, float4(splat.pos,1)).xyz;
-    float4 centerClipPos = mul(UNITY_MATRIX_VP, float4(centerWorldPos, 1));
+    float4 centerClipPos = mul(vpMatrix, float4(centerWorldPos, 1));
     half opacityScale = _SplatOpacityScale;
     float splatScale = _SplatScale;
 

@@ -261,6 +261,7 @@ namespace GaussianSplatting.Runtime
         internal bool m_GpuChunksValid;
         internal GraphicsBuffer m_GpuView;
         internal GraphicsBuffer m_GpuIndexBuffer;
+        internal GraphicsBuffer m_GpuSplatEyeIndex;
 
         // these buffers are only for splat editing, and are lazily created
         GraphicsBuffer m_GpuEditCutouts;
@@ -328,6 +329,9 @@ namespace GaussianSplatting.Runtime
             public static readonly int SelectionMode = Shader.PropertyToID("_SelectionMode");
             public static readonly int SplatPosMouseDown = Shader.PropertyToID("_SplatPosMouseDown");
             public static readonly int SplatOtherMouseDown = Shader.PropertyToID("_SplatOtherMouseDown");
+            public static readonly int ViewProjMatrixLeft = Shader.PropertyToID("_ViewProjMatrixLeft");
+            public static readonly int ViewProjMatrixRight = Shader.PropertyToID("_ViewProjMatrixRight");
+            public static readonly int SplatEyeIndex = Shader.PropertyToID("_SplatEyeIndex");
         }
 
         [field: NonSerialized] public bool editModified { get; private set; }
@@ -417,6 +421,12 @@ namespace GaussianSplatting.Runtime
                 2, 3, 6, 3, 7, 6
             });
 
+            // Create and initialize eye index buffer
+            m_GpuSplatEyeIndex = new GraphicsBuffer(GraphicsBuffer.Target.Structured, m_SplatCount, sizeof(uint)) { name = "GaussianSplatEyeIndex" };
+            uint[] eyeIndices = new uint[m_SplatCount];
+            for (int i = 0; i < m_SplatCount; ++i) eyeIndices[i] = (uint)(i % 2);
+            m_GpuSplatEyeIndex.SetData(eyeIndices);
+
             InitSortBuffers(splatCount);
         }
 
@@ -497,6 +507,7 @@ namespace GaussianSplatting.Runtime
             cmb.SetComputeBufferParam(cs, kernelIndex, Props.SplatDeletedBits, m_GpuEditDeleted ?? m_GpuPosData);
             cmb.SetComputeBufferParam(cs, kernelIndex, Props.SplatViewData, m_GpuView);
             cmb.SetComputeBufferParam(cs, kernelIndex, Props.OrderBuffer, m_GpuSortKeys);
+            cmb.SetComputeBufferParam(cs, kernelIndex, Props.SplatEyeIndex, m_GpuSplatEyeIndex);
 
             cmb.SetComputeIntParam(cs, Props.SplatBitsValid, m_GpuEditSelected != null && m_GpuEditDeleted != null ? 1 : 0);
             uint format = (uint)m_Asset.posFormat | ((uint)m_Asset.scaleFormat << 8) | ((uint)m_Asset.shFormat << 16);
@@ -543,6 +554,7 @@ namespace GaussianSplatting.Runtime
             DisposeBuffer(ref m_GpuIndexBuffer);
             DisposeBuffer(ref m_GpuSortDistances);
             DisposeBuffer(ref m_GpuSortKeys);
+            DisposeBuffer(ref m_GpuSplatEyeIndex);
 
             DisposeBuffer(ref m_GpuEditSelectedMouseDown);
             DisposeBuffer(ref m_GpuEditPosMouseDown);
@@ -584,6 +596,7 @@ namespace GaussianSplatting.Runtime
             var tr = transform;
 
             Matrix4x4 matView = cam.worldToCameraMatrix;
+            // Matrix4x4 matProj = GL.GetGPUProjectionMatrix(cam.projectionMatrix, true);
             Matrix4x4 matO2W = tr.localToWorldMatrix;
             Matrix4x4 matW2O = tr.worldToLocalMatrix;
             int screenW = cam.pixelWidth, screenH = cam.pixelHeight;
@@ -597,6 +610,19 @@ namespace GaussianSplatting.Runtime
             cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.MatrixMV, matView * matO2W);
             cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.MatrixObjectToWorld, matO2W);
             cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.MatrixWorldToObject, matW2O);
+            
+            // cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.ViewProjMatrixLeft, matProj * matView);
+
+            Matrix4x4 stereoViewLeft = cam.GetStereoViewMatrix(Camera.StereoscopicEye.Left);
+            Matrix4x4 stereoProjLeft = GL.GetGPUProjectionMatrix(cam.GetStereoProjectionMatrix(Camera.StereoscopicEye.Left), true);
+            Matrix4x4 matVPLeft = stereoProjLeft * stereoViewLeft;
+            cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.ViewProjMatrixLeft, matVPLeft);
+
+            // Get stereo camera matrices if available
+            Matrix4x4 stereoViewRight = cam.GetStereoViewMatrix(Camera.StereoscopicEye.Right);
+            Matrix4x4 stereoProjRight = GL.GetGPUProjectionMatrix(cam.GetStereoProjectionMatrix(Camera.StereoscopicEye.Right), true);
+            Matrix4x4 matVPRight = stereoProjRight * stereoViewRight;
+            cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.ViewProjMatrixRight, matVPRight);
 
             cmb.SetComputeVectorParam(m_CSSplatUtilities, Props.VecScreenParams, screenPar);
             cmb.SetComputeVectorParam(m_CSSplatUtilities, Props.VecWorldSpaceCameraPos, camPos);
@@ -987,6 +1013,12 @@ namespace GaussianSplatting.Runtime
             var newColorData = new RenderTexture(texWidth, texHeight, texFormat, GraphicsFormat.None) { name = "GaussianColorData", enableRandomWrite = true };
             newColorData.Create();
 
+            // Create new eye index buffer
+            var newSplatEyeIndex = new GraphicsBuffer(GraphicsBuffer.Target.Structured, newSplatCount, sizeof(uint)) { name = "GaussianSplatEyeIndex" };
+            uint[] eyeIndices = new uint[newSplatCount];
+            for (int i = 0; i < newSplatCount; ++i) eyeIndices[i] = (uint)(i % 2);
+            newSplatEyeIndex.SetData(eyeIndices);
+
             // selected/deleted buffers
             var selTarget = GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.CopySource | GraphicsBuffer.Target.CopyDestination;
             var selSize = (newSplatCount + 31) / 32;
@@ -1009,6 +1041,7 @@ namespace GaussianSplatting.Runtime
             m_GpuSHData.Dispose();
             DestroyImmediate(m_GpuColorData);
             m_GpuView.Dispose();
+            m_GpuSplatEyeIndex.Dispose();
 
             m_GpuEditSelected?.Dispose();
             m_GpuEditSelectedMouseDown?.Dispose();
@@ -1019,6 +1052,7 @@ namespace GaussianSplatting.Runtime
             m_GpuSHData = newSHData;
             m_GpuColorData = newColorData;
             m_GpuView = newGpuView;
+            m_GpuSplatEyeIndex = newSplatEyeIndex;
             m_GpuEditSelected = newEditSelected;
             m_GpuEditSelectedMouseDown = newEditSelectedMouseDown;
             m_GpuEditDeleted = newEditDeleted;
