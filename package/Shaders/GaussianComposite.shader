@@ -52,15 +52,35 @@ v2f vert (appdata v)
     return o;
 }
 
+// For backward compatibility
 UNITY_DECLARE_SCREENSPACE_TEXTURE(_GaussianSplatRT);
+
+// Separate textures for left and right eyes
+Texture2D _LeftEyeTex;
+// SAMPLER(sampler_LeftEyeTex);
+
+Texture2D _RightEyeTex;
+// SAMPLER(sampler_RightEyeTex);
 
 half4 frag (v2f i) : SV_Target
 {
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(i);
     
     // Normalize the pixel coordinates to [0,1] range
-    float2 normalizedUV = float2(i.vertex.x / _ScreenParams.x, i.vertex.y / _ScreenParams.y);    
-    half4 col = UNITY_SAMPLE_SCREENSPACE_TEXTURE(_GaussianSplatRT, normalizedUV);
+    float2 normalizedUV = float2(i.vertex.x / _ScreenParams.x, i.vertex.y / _ScreenParams.y);
+    
+    half4 col;
+    
+    // Check if using separate eye textures
+    #if defined(UNITY_SINGLE_PASS_STEREO) || defined(STEREO_INSTANCING_ON) || defined(STEREO_MULTIVIEW_ON)
+        if (unity_StereoEyeIndex == 0)
+            col = _LeftEyeTex.Load(int3(i.vertex.xy, 0));
+        else
+            col = _RightEyeTex.Load(int3(i.vertex.xy, 0));
+    #else
+        // Fallback to legacy single-texture approach for backward compatibility
+        col = UNITY_SAMPLE_SCREENSPACE_TEXTURE(_GaussianSplatRT, normalizedUV);
+    #endif
     
     col.rgb = GammaToLinearSpace(col.rgb);
     col.a = saturate(col.a * 1.5);

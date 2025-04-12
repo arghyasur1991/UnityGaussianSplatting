@@ -162,7 +162,7 @@ namespace GaussianSplatting.Runtime
                     instanceCount = gs.m_GpuChunksValid ? gs.m_GpuChunks.count : 0;
 
                 cmb.BeginSample(s_ProfDraw);
-                cmb.DrawProcedural(gs.m_GpuIndexBuffer, matrix, displayMat, 0, topology, indexCount, 2 * instanceCount, mpb);
+                cmb.DrawProcedural(gs.m_GpuIndexBuffer, matrix, displayMat, 0, topology, indexCount, instanceCount, mpb);
                 cmb.EndSample(s_ProfDraw);
             }
             return matComposite;
@@ -181,6 +181,10 @@ namespace GaussianSplatting.Runtime
 
             // get render target for all splats
             m_CommandBuffer.Clear();
+            
+            // Keep GaussianSplatRT for backward compatibility, but we'll primarily use LeftEyeRT and RightEyeRT for stereo
+            m_CommandBuffer.GetTemporaryRT(GaussianSplatRenderer.Props.GaussianSplatRT, -1, -1, 0, FilterMode.Point, GraphicsFormat.R16G16B16A16_SFloat);
+            
             return m_CommandBuffer;
         }
 
@@ -191,23 +195,39 @@ namespace GaussianSplatting.Runtime
 
             InitialClearCmdBuffer(cam);
 
-            m_CommandBuffer.GetTemporaryRT(GaussianSplatRenderer.Props.GaussianSplatRT, -1, -1, 0, FilterMode.Point, GraphicsFormat.R16G16B16A16_SFloat);
-            m_CommandBuffer.SetRenderTarget(GaussianSplatRenderer.Props.GaussianSplatRT, BuiltinRenderTextureType.CurrentActive);
-            m_CommandBuffer.ClearRenderTarget(RTClearFlags.Color, new Color(0, 0, 0, 0), 0, 0);
+            // Create separate render targets for left and right eyes
+            m_CommandBuffer.GetTemporaryRT(GaussianSplatRenderer.Props.LeftEyeRT, -1, -1, 0, FilterMode.Point, GraphicsFormat.R16G16B16A16_SFloat);
+            m_CommandBuffer.GetTemporaryRT(GaussianSplatRenderer.Props.RightEyeRT, -1, -1, 0, FilterMode.Point, GraphicsFormat.R16G16B16A16_SFloat);
 
             // We only need this to determine whether we're rendering into backbuffer or not. However, detection this
             // way only works in BiRP so only do it here.
             m_CommandBuffer.SetGlobalTexture(GaussianSplatRenderer.Props.CameraTargetTexture, BuiltinRenderTextureType.CameraTarget);
 
-            // add sorting, view calc and drawing commands for each splat object
+            // Left eye rendering
+            m_CommandBuffer.SetRenderTarget(GaussianSplatRenderer.Props.LeftEyeRT, BuiltinRenderTextureType.CurrentActive);
+            m_CommandBuffer.ClearRenderTarget(RTClearFlags.Color, new Color(0, 0, 0, 0), 0, 0);
+            
+            // add sorting, view calc and drawing commands for each splat object for left eye
             Material matComposite = SortAndRenderSplats(cam, m_CommandBuffer, 0);
 
-            // compose
+            // Right eye rendering
+            m_CommandBuffer.SetRenderTarget(GaussianSplatRenderer.Props.RightEyeRT, BuiltinRenderTextureType.CurrentActive);
+            m_CommandBuffer.ClearRenderTarget(RTClearFlags.Color, new Color(0, 0, 0, 0), 0, 0);
+            
+            // add sorting, view calc and drawing commands for each splat object for right eye
+            SortAndRenderSplats(cam, m_CommandBuffer, 1);
+
+            // compose - pass both textures to the composite shader
             m_CommandBuffer.BeginSample(s_ProfCompose);
             m_CommandBuffer.SetRenderTarget(BuiltinRenderTextureType.CameraTarget);
+            m_CommandBuffer.SetGlobalTexture("_LeftEyeTex", GaussianSplatRenderer.Props.LeftEyeRT);
+            m_CommandBuffer.SetGlobalTexture("_RightEyeTex", GaussianSplatRenderer.Props.RightEyeRT);
             m_CommandBuffer.DrawProcedural(Matrix4x4.identity, matComposite, 0, MeshTopology.Triangles, 3, 1);
             m_CommandBuffer.EndSample(s_ProfCompose);
-            m_CommandBuffer.ReleaseTemporaryRT(GaussianSplatRenderer.Props.GaussianSplatRT);
+            
+            // Release the render textures
+            m_CommandBuffer.ReleaseTemporaryRT(GaussianSplatRenderer.Props.LeftEyeRT);
+            m_CommandBuffer.ReleaseTemporaryRT(GaussianSplatRenderer.Props.RightEyeRT);
         }
     }
 
@@ -310,6 +330,8 @@ namespace GaussianSplatting.Runtime
             public static readonly int DisplayIndex = Shader.PropertyToID("_DisplayIndex");
             public static readonly int DisplayChunks = Shader.PropertyToID("_DisplayChunks");
             public static readonly int GaussianSplatRT = Shader.PropertyToID("_GaussianSplatRT");
+            public static readonly int LeftEyeRT = Shader.PropertyToID("_LeftEyeTex");
+            public static readonly int RightEyeRT = Shader.PropertyToID("_RightEyeTex");
             public static readonly int SplatSortKeys = Shader.PropertyToID("_SplatSortKeys");
             public static readonly int SplatSortDistances = Shader.PropertyToID("_SplatSortDistances");
             public static readonly int SrcBuffer = Shader.PropertyToID("_SrcBuffer");
@@ -607,12 +629,12 @@ namespace GaussianSplatting.Runtime
             // Get correct stereo matrices for each eye
             Matrix4x4 stereoViewLeft = cam.GetStereoViewMatrix(Camera.StereoscopicEye.Left);
             Matrix4x4 stereoProjLeft = GL.GetGPUProjectionMatrix(cam.GetStereoProjectionMatrix(Camera.StereoscopicEye.Left), true);
-            Matrix4x4 matVPLeft = stereoProjLeft * stereoViewLeft;// * matO2W;
+            Matrix4x4 matVPLeft = stereoProjLeft * stereoViewLeft;
             cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.ViewProjMatrixLeft, matVPLeft);
 
             Matrix4x4 stereoViewRight = cam.GetStereoViewMatrix(Camera.StereoscopicEye.Right);
             Matrix4x4 stereoProjRight = GL.GetGPUProjectionMatrix(cam.GetStereoProjectionMatrix(Camera.StereoscopicEye.Right), true);
-            Matrix4x4 matVPRight = stereoProjRight * stereoViewRight;// * matO2W;
+            Matrix4x4 matVPRight = stereoProjRight * stereoViewRight;
             cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.ViewProjMatrixRight, matVPRight);
 
             cmb.SetComputeVectorParam(m_CSSplatUtilities, Props.VecScreenParams, screenPar);
