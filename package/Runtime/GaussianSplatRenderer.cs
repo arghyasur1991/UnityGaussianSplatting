@@ -105,7 +105,7 @@ namespace GaussianSplatting.Runtime
         }
 
         // ReSharper disable once MemberCanBePrivate.Global - used by HDRP/URP features that are not always compiled
-        public Material SortAndRenderSplats(Camera cam, CommandBuffer cmb)
+        public Material SortAndRenderSplats(Camera cam, CommandBuffer cmb, int eyeIndex)
         {
             Material matComposite = null;
             foreach (var kvp in m_ActiveSplats)
@@ -134,7 +134,7 @@ namespace GaussianSplatting.Runtime
                 if (displayMat == null)
                     continue;
 
-                gs.SetAssetDataOnMaterial(mpb);
+                gs.SetAssetDataOnMaterial(mpb, eyeIndex);
                 mpb.SetBuffer(GaussianSplatRenderer.Props.SplatChunks, gs.m_GpuChunks);
 
                 mpb.SetBuffer(GaussianSplatRenderer.Props.SplatViewData, gs.m_GpuView);
@@ -162,7 +162,7 @@ namespace GaussianSplatting.Runtime
                     instanceCount = gs.m_GpuChunksValid ? gs.m_GpuChunks.count : 0;
 
                 cmb.BeginSample(s_ProfDraw);
-                cmb.DrawProcedural(gs.m_GpuIndexBuffer, matrix, displayMat, 0, topology, indexCount, instanceCount, mpb);
+                cmb.DrawProcedural(gs.m_GpuIndexBuffer, matrix, displayMat, 0, topology, indexCount, 2 * instanceCount, mpb);
                 cmb.EndSample(s_ProfDraw);
             }
             return matComposite;
@@ -200,7 +200,7 @@ namespace GaussianSplatting.Runtime
             m_CommandBuffer.SetGlobalTexture(GaussianSplatRenderer.Props.CameraTargetTexture, BuiltinRenderTextureType.CameraTarget);
 
             // add sorting, view calc and drawing commands for each splat object
-            Material matComposite = SortAndRenderSplats(cam, m_CommandBuffer);
+            Material matComposite = SortAndRenderSplats(cam, m_CommandBuffer, 0);
 
             // compose
             m_CommandBuffer.BeginSample(s_ProfCompose);
@@ -297,6 +297,7 @@ namespace GaussianSplatting.Runtime
             public static readonly int SplatBitsValid = Shader.PropertyToID("_SplatBitsValid");
             public static readonly int SplatFormat = Shader.PropertyToID("_SplatFormat");
             public static readonly int SplatChunks = Shader.PropertyToID("_SplatChunks");
+            public static readonly int EyeIndex = Shader.PropertyToID("_EyeIndex");
             public static readonly int SplatChunkCount = Shader.PropertyToID("_SplatChunkCount");
             public static readonly int SplatViewData = Shader.PropertyToID("_SplatViewData");
             public static readonly int OrderBuffer = Shader.PropertyToID("_OrderBuffer");
@@ -512,7 +513,7 @@ namespace GaussianSplatting.Runtime
             cmb.SetComputeBufferParam(cs, kernelIndex, Props.SplatCutouts, m_GpuEditCutouts);
         }
 
-        internal void SetAssetDataOnMaterial(MaterialPropertyBlock mat)
+        internal void SetAssetDataOnMaterial(MaterialPropertyBlock mat, int eyeIndex)
         {
             mat.SetBuffer(Props.SplatPos, m_GpuPosData);
             mat.SetBuffer(Props.SplatOther, m_GpuOtherData);
@@ -520,6 +521,7 @@ namespace GaussianSplatting.Runtime
             mat.SetTexture(Props.SplatColor, m_GpuColorData);
             mat.SetBuffer(Props.SplatSelectedBits, m_GpuEditSelected ?? m_GpuPosData);
             mat.SetBuffer(Props.SplatDeletedBits, m_GpuEditDeleted ?? m_GpuPosData);
+            mat.SetInteger(Props.EyeIndex, eyeIndex);
             // mat.SetBuffer(Props.SplatViewData, m_GpuView);
             mat.SetInt(Props.SplatBitsValid, m_GpuEditSelected != null && m_GpuEditDeleted != null ? 1 : 0);
             uint format = (uint)m_Asset.posFormat | ((uint)m_Asset.scaleFormat << 8) | ((uint)m_Asset.shFormat << 16);

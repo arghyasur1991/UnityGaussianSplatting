@@ -64,7 +64,7 @@ namespace GaussianSplatting.Runtime
                     using var _ = new ProfilingScope(commandBuffer, s_profilingSampler);
                     commandBuffer.SetGlobalTexture(s_gaussianSplatRT, data.GaussianSplatRT);
                     CoreUtils.SetRenderTarget(commandBuffer, data.GaussianSplatRT, data.SourceDepth, ClearFlag.Color, Color.clear);
-                    Material matComposite = GaussianSplatRenderSystem.instance.SortAndRenderSplats(data.CameraData.camera, commandBuffer);
+                    Material matComposite = GaussianSplatRenderSystem.instance.SortAndRenderSplats(data.CameraData.camera, commandBuffer, 0);
                     commandBuffer.BeginSample(GaussianSplatRenderSystem.s_ProfCompose);
                     Blitter.BlitCameraTexture(commandBuffer, data.GaussianSplatRT, data.SourceTexture, matComposite, 0);
                     commandBuffer.EndSample(GaussianSplatRenderSystem.s_ProfCompose);

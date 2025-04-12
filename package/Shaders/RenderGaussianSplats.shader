@@ -31,12 +31,14 @@ struct v2f
 StructuredBuffer<SplatViewData> _SplatViewData;
 ByteAddressBuffer _SplatSelectedBits;
 uint _SplatBitsValid;
+uint _EyeIndex;
 
 v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
 {
     v2f o = (v2f)0;
-    instID = _OrderBuffer[instID];
-    uint eyeIndex = 1;
+    uint eyeIndex = instID & 1;
+    instID = _OrderBuffer[instID / 2];
+    // uint eyeIndex = 1;
 	SplatViewData view = _SplatViewData[instID * 2 + eyeIndex];
 	float4 centerClipPos = view.pos;
 	bool behindCam = centerClipPos.w <= 0;
