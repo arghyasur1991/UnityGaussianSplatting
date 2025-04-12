@@ -36,7 +36,8 @@ v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
 {
     v2f o = (v2f)0;
     instID = _OrderBuffer[instID];
-	SplatViewData view = _SplatViewData[instID];
+    uint eyeIndex = 1;
+	SplatViewData view = _SplatViewData[instID * 2 + eyeIndex];
 	float4 centerClipPos = view.pos;
 	bool behindCam = centerClipPos.w <= 0;
 	if (behindCam)
