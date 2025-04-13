@@ -162,7 +162,7 @@ namespace GaussianSplatting.Runtime
                     instanceCount = gs.m_GpuChunksValid ? gs.m_GpuChunks.count : 0;
 
                 cmb.BeginSample(s_ProfDraw);
-                cmb.DrawProcedural(gs.m_GpuIndexBuffer, matrix, displayMat, 0, topology, indexCount, instanceCount * 2, mpb);
+                cmb.DrawProcedural(gs.m_GpuIndexBuffer, matrix, displayMat, 0, topology, indexCount, instanceCount, mpb);
                 cmb.EndSample(s_ProfDraw);
             }
             return matComposite;
@@ -190,6 +190,8 @@ namespace GaussianSplatting.Runtime
 
         void OnPreCullCamera(Camera cam)
         {
+            Debug.Log("OnPreCullCamera");
+            return;
             if (!GatherSplatsForCamera(cam))
                 return;
 
@@ -197,7 +199,7 @@ namespace GaussianSplatting.Runtime
 
             // Create separate render targets for left and right eyes
             m_CommandBuffer.GetTemporaryRT(GaussianSplatRenderer.Props.LeftEyeRT, -1, -1, 0, FilterMode.Point, GraphicsFormat.R16G16B16A16_SFloat);
-            // m_CommandBuffer.GetTemporaryRT(GaussianSplatRenderer.Props.RightEyeRT, -1, -1, 0, FilterMode.Point, GraphicsFormat.R16G16B16A16_SFloat);
+            m_CommandBuffer.GetTemporaryRT(GaussianSplatRenderer.Props.RightEyeRT, -1, -1, 0, FilterMode.Point, GraphicsFormat.R16G16B16A16_SFloat);
 // Left eye rendering
             m_CommandBuffer.SetRenderTarget(GaussianSplatRenderer.Props.LeftEyeRT, BuiltinRenderTextureType.CurrentActive);
             m_CommandBuffer.ClearRenderTarget(RTClearFlags.Color, new Color(0, 0, 0, 0), 0, 0);
@@ -211,23 +213,25 @@ namespace GaussianSplatting.Runtime
             Material matComposite = SortAndRenderSplats(cam, m_CommandBuffer, 0);
 
             // Right eye rendering
-            // m_CommandBuffer.SetRenderTarget(GaussianSplatRenderer.Props.RightEyeRT, BuiltinRenderTextureType.CurrentActive);
-            // m_CommandBuffer.ClearRenderTarget(RTClearFlags.Color, new Color(0, 0, 0, 0), 0, 0);
+            m_CommandBuffer.SetRenderTarget(GaussianSplatRenderer.Props.RightEyeRT, BuiltinRenderTextureType.CurrentActive);
+            m_CommandBuffer.ClearRenderTarget(RTClearFlags.Color, new Color(0, 0, 0, 0), 0, 0);
             
             // // add sorting, view calc and drawing commands for each splat object for right eye
-            // SortAndRenderSplats(cam, m_CommandBuffer, 1);
+            SortAndRenderSplats(cam, m_CommandBuffer, 1);
 
             // compose - pass both textures to the composite shader
             m_CommandBuffer.BeginSample(s_ProfCompose);
             m_CommandBuffer.SetRenderTarget(BuiltinRenderTextureType.CameraTarget);
             // m_CommandBuffer.SetGlobalTexture("_LeftEyeTex", GaussianSplatRenderer.Props.LeftEyeRT);
             // m_CommandBuffer.SetGlobalTexture("_RightEyeTex", GaussianSplatRenderer.Props.RightEyeRT);
+            // matComposite.SetTexture("_LeftEyeTex", GaussianSplatRenderer.Props.LeftEyeRT);
+            // matComposite.SetTexture("_RightEyeTex", GaussianSplatRenderer.Props.RightEyeRT);
             m_CommandBuffer.DrawProcedural(Matrix4x4.identity, matComposite, 0, MeshTopology.Triangles, 3, 1);
             m_CommandBuffer.EndSample(s_ProfCompose);
             
             // Release the render textures
             m_CommandBuffer.ReleaseTemporaryRT(GaussianSplatRenderer.Props.LeftEyeRT);
-            // m_CommandBuffer.ReleaseTemporaryRT(GaussianSplatRenderer.Props.RightEyeRT);
+            m_CommandBuffer.ReleaseTemporaryRT(GaussianSplatRenderer.Props.RightEyeRT);
         }
     }
 
@@ -331,7 +335,7 @@ namespace GaussianSplatting.Runtime
             public static readonly int DisplayChunks = Shader.PropertyToID("_DisplayChunks");
             // public static readonly int GaussianSplatRT = Shader.PropertyToID("_GaussianSplatRT");
             public static readonly int LeftEyeRT = Shader.PropertyToID("_LeftEyeTex");
-            // public static readonly int RightEyeRT = Shader.PropertyToID("_RightEyeTex");
+            public static readonly int RightEyeRT = Shader.PropertyToID("_RightEyeTex");
             public static readonly int SplatSortKeys = Shader.PropertyToID("_SplatSortKeys");
             public static readonly int SplatSortDistances = Shader.PropertyToID("_SplatSortDistances");
             public static readonly int SrcBuffer = Shader.PropertyToID("_SrcBuffer");
