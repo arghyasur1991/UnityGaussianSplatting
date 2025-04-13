@@ -15,7 +15,6 @@ Shader "Hidden/Gaussian Splatting/CompositeStereo"
             #pragma geometry geom
             #pragma fragment frag
             #pragma require compute
-            #pragma use_dxc
             #pragma require 2darray
             #pragma target 4.5
 

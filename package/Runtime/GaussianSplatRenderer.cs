@@ -202,32 +202,28 @@ namespace GaussianSplatting.Runtime
 
         // New optimized method that just draws the prepared splats for a specific eye
         // ReSharper disable once MemberCanBePrivate.Global - used by HDRP/URP features that are not always compiled
-        public void RenderPreparedSplats(CommandBuffer cmb, int eyeIndex)
+        public void RenderPreparedSplats(CommandBuffer cmb, bool isStereo)
         {
             if (m_LastPreparedData == null || m_LastPreparedData.renderItems.Count == 0)
                 return;
 
             foreach (var item in m_LastPreparedData.renderItems)
             {
-                // Set the eye index for this specific render
-                item.mpb.SetInteger(GaussianSplatRenderer.Props.EyeIndex, eyeIndex);
-                item.mpb.SetInteger(GaussianSplatRenderer.Props.IsStereo, 1);
-
                 // Draw
                 cmb.BeginSample(s_ProfDraw);
-                cmb.DrawProcedural(item.gs.m_GpuIndexBuffer, item.gs.transform.localToWorldMatrix, item.displayMat, 0, item.topology, item.indexCount, item.instanceCount, item.mpb);
+                cmb.DrawProcedural(item.gs.m_GpuIndexBuffer, item.gs.transform.localToWorldMatrix, item.displayMat, 0, item.topology, item.indexCount, item.instanceCount * (isStereo ? 2 : 1), item.mpb);
                 cmb.EndSample(s_ProfDraw);
             }
         }
 
         // ReSharper disable once MemberCanBePrivate.Global - used by HDRP/URP features that are not always compiled
-        public Material SortAndRenderSplats(Camera cam, CommandBuffer cmb, int eyeIndex = -1)
+        public Material SortAndRenderSplats(Camera cam, CommandBuffer cmb, bool isStereo = false)
         {
             // Prepare the splats (sort and calculate view data)
             var renderData = PrepareSplats(cam, cmb);
             
             // Render the prepared splats
-            RenderPreparedSplats(cmb, eyeIndex);
+            RenderPreparedSplats(cmb, isStereo);
             
             // Return the composite material
             return renderData.matComposite;
@@ -274,17 +270,6 @@ namespace GaussianSplatting.Runtime
             m_CommandBuffer.EndSample(s_ProfCompose);
             m_CommandBuffer.ReleaseTemporaryRT(GaussianSplatRenderer.Props.GaussianSplatRT);
         }
-        
-        // Checks if any active splats require per-eye sorting
-        public bool RequiresPerEyeSorting()
-        {
-            foreach (var item in m_ActiveSplats)
-            {
-                if (item.Item1.m_SortPerEye)
-                    return true;
-            }
-            return false;
-        }
     }
 
     [ExecuteInEditMode]
@@ -313,15 +298,14 @@ namespace GaussianSplatting.Runtime
         public bool m_SHOnly;
         [Range(1,30)] [Tooltip("Sort splats only every N frames")]
         public int m_SortNthFrame = 1;
-        [Tooltip("When in VR, sort splats separately for each eye. This increases accuracy but reduces performance.")]
-        public bool m_SortPerEye = false;
 
         public RenderMode m_RenderMode = RenderMode.Splats;
         [Range(1.0f,15.0f)] public float m_PointDisplaySize = 3.0f;
 
         public GaussianCutout[] m_Cutouts;
 
-        public Shader m_ShaderSplats;
+        public Shader m_ShaderSplatsStereo;
+        public Shader m_ShaderSplatsNonStereo;
         public Shader m_ShaderCompositeStereo;
         public Shader m_ShaderCompositeNonStereo;
         public Shader m_ShaderDebugPoints;
@@ -528,20 +512,59 @@ namespace GaussianSplatting.Runtime
                 m_SorterArgs.resources = GpuSorting.SupportResources.Load((uint)count);
         }
 
-        bool resourcesAreSetUp => m_ShaderSplats != null && m_ShaderDebugPoints != null &&
+        bool resourcesAreSetUp => (m_ShaderSplatsStereo != null || m_ShaderSplatsNonStereo != null) && 
+                                  m_ShaderDebugPoints != null &&
                                   m_ShaderDebugBoxes != null && m_CSSplatUtilities != null && SystemInfo.supportsComputeShaders;
 
         public void EnsureMaterials()
         {
             if (!resourcesAreSetUp)
                 return;
-            m_MatSplats ??= new Material(m_ShaderSplats) {name = "GaussianSplats"};
-            
+                
             // Auto-find the specific composite shaders if not assigned
             if (m_ShaderCompositeStereo == null)
                 m_ShaderCompositeStereo = Shader.Find("Hidden/Gaussian Splatting/CompositeStereo");
             if (m_ShaderCompositeNonStereo == null)
                 m_ShaderCompositeNonStereo = Shader.Find("Hidden/Gaussian Splatting/CompositeNonStereo");
+                
+            // Auto-find the specific splat render shaders if not assigned
+            if (m_ShaderSplatsStereo == null)
+                m_ShaderSplatsStereo = Shader.Find("Gaussian Splatting/Render Splats Stereo");
+            if (m_ShaderSplatsNonStereo == null)
+                m_ShaderSplatsNonStereo = Shader.Find("Gaussian Splatting/Render Splats Non Stereo");
+            
+            // Choose the appropriate splat render shader based on XR status
+            Shader splatsShader;
+            if (XRSettings.enabled && 
+                (XRSettings.stereoRenderingMode == XRSettings.StereoRenderingMode.SinglePassInstanced ||
+                 XRSettings.stereoRenderingMode == XRSettings.StereoRenderingMode.SinglePassMultiview))
+            {
+                splatsShader = m_ShaderSplatsStereo;
+                if (splatsShader == null)
+                {
+                    Debug.LogError("Missing stereo splats shader. Please assign m_ShaderSplatsStereo.");
+                    return;
+                }
+            }
+            else
+            {
+                splatsShader = m_ShaderSplatsNonStereo;
+                if (splatsShader == null)
+                {
+                    Debug.LogError("Missing non-stereo splats shader. Please assign m_ShaderSplatsNonStereo.");
+                    return;
+                }
+            }
+            
+            // Create or update the material
+            if (m_MatSplats == null || m_MatSplats.shader != splatsShader)
+            {
+                if (m_MatSplats != null)
+                {
+                    DestroyImmediate(m_MatSplats);
+                }
+                m_MatSplats = new Material(splatsShader) {name = "GaussianSplats"};
+            }
             
             UpdateCompositeMaterial();
             

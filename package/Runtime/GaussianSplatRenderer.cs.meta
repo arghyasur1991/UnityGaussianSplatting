@@ -5,7 +5,8 @@ MonoImporter:
   serializedVersion: 2
   defaultReferences:
   - m_Asset: {instanceID: 0}
-  - m_ShaderSplats: {fileID: 4800000, guid: ed800126ae8844a67aad1974ddddd59c, type: 3}
+  - m_ShaderSplatsStereo: {fileID: 4800000, guid: 51b2170498d3e41c789bbc9eef8a7727, type: 3}
+  - m_ShaderSplatsNonStereo: {fileID: 4800000, guid: 32463355ce1504cf0a89faeddc3a980c, type: 3}
   - m_ShaderCompositeStereo: {fileID: 4800000, guid: 33af7bdcf6b8c446aa96887d1f95e9fc, type: 3}
   - m_ShaderCompositeNonStereo: {fileID: 4800000, guid: 448c078c0d9da45a0afb7510885b3606, type: 3}
   - m_ShaderDebugPoints: {fileID: 4800000, guid: b44409fc67214394f8f47e4e2648425e, type: 3}

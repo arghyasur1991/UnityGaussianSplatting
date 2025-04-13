@@ -27,11 +27,11 @@ namespace GaussianSplatting.Editor
         SerializedProperty m_PropSHOrder;
         SerializedProperty m_PropSHOnly;
         SerializedProperty m_PropSortNthFrame;
-        SerializedProperty m_PropSortPerEye;
         SerializedProperty m_PropRenderMode;
         SerializedProperty m_PropPointDisplaySize;
         SerializedProperty m_PropCutouts;
-        SerializedProperty m_PropShaderSplats;
+        SerializedProperty m_PropShaderSplatsStereo;
+        SerializedProperty m_PropShaderSplatsNonStereo;
         SerializedProperty m_PropShaderCompositeStereo;
         SerializedProperty m_PropShaderCompositeNonStereo;
         SerializedProperty m_PropShaderDebugPoints;
@@ -69,11 +69,11 @@ namespace GaussianSplatting.Editor
             m_PropSHOrder = serializedObject.FindProperty("m_SHOrder");
             m_PropSHOnly = serializedObject.FindProperty("m_SHOnly");
             m_PropSortNthFrame = serializedObject.FindProperty("m_SortNthFrame");
-            m_PropSortPerEye = serializedObject.FindProperty("m_SortPerEye");
             m_PropRenderMode = serializedObject.FindProperty("m_RenderMode");
             m_PropPointDisplaySize = serializedObject.FindProperty("m_PointDisplaySize");
             m_PropCutouts = serializedObject.FindProperty("m_Cutouts");
-            m_PropShaderSplats = serializedObject.FindProperty("m_ShaderSplats");
+            m_PropShaderSplatsStereo = serializedObject.FindProperty("m_ShaderSplatsStereo");
+            m_PropShaderSplatsNonStereo = serializedObject.FindProperty("m_ShaderSplatsNonStereo");
             m_PropShaderCompositeStereo = serializedObject.FindProperty("m_ShaderCompositeStereo");
             m_PropShaderCompositeNonStereo = serializedObject.FindProperty("m_ShaderCompositeNonStereo");
             m_PropShaderDebugPoints = serializedObject.FindProperty("m_ShaderDebugPoints");
@@ -115,7 +115,6 @@ namespace GaussianSplatting.Editor
             EditorGUILayout.PropertyField(m_PropSHOrder);
             EditorGUILayout.PropertyField(m_PropSHOnly);
             EditorGUILayout.PropertyField(m_PropSortNthFrame);
-            EditorGUILayout.PropertyField(m_PropSortPerEye);
             EditorGUILayout.Space();
             GUILayout.Label("Debugging Tweaks", EditorStyles.boldLabel);
             EditorGUILayout.PropertyField(m_PropRenderMode);
@@ -126,7 +125,8 @@ namespace GaussianSplatting.Editor
             m_ResourcesExpanded = EditorGUILayout.Foldout(m_ResourcesExpanded, "Resources", true, EditorStyles.foldoutHeader);
             if (m_ResourcesExpanded)
             {
-                EditorGUILayout.PropertyField(m_PropShaderSplats);
+                EditorGUILayout.PropertyField(m_PropShaderSplatsStereo);
+                EditorGUILayout.PropertyField(m_PropShaderSplatsNonStereo);
                 EditorGUILayout.PropertyField(m_PropShaderCompositeStereo);
                 EditorGUILayout.PropertyField(m_PropShaderCompositeNonStereo);
                 EditorGUILayout.PropertyField(m_PropShaderDebugPoints);
