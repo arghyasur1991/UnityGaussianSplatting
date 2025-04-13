@@ -113,13 +113,9 @@ namespace GaussianSplatting.Runtime
                         commandBuffer.BeginSample(GaussianSplatRenderSystem.s_ProfCompose);
                         matComposite.SetTexture(s_gaussianSplatRT, data.GaussianSplatRT);
                         
-                        commandBuffer.SetRenderTarget(data.SourceTexture, 0, CubemapFace.Unknown, 0);
-                        commandBuffer.SetGlobalInt("_CustomStereoEyeIndex", 0); // emulate left
-                        commandBuffer.DrawProcedural(Matrix4x4.identity, matComposite, 0, MeshTopology.Triangles, 3, 1);
-
-                        commandBuffer.SetRenderTarget(data.SourceTexture, 0, CubemapFace.Unknown, 1);
-                        commandBuffer.SetGlobalInt("_CustomStereoEyeIndex", 1); // emulate right
-                        commandBuffer.DrawProcedural(Matrix4x4.identity, matComposite, 0, MeshTopology.Triangles, 3, 1);
+                        // Single instanced draw call with 2 instances (for left and right eyes)
+                        commandBuffer.SetRenderTarget(data.SourceTexture, 0, CubemapFace.Unknown, -1);
+                        commandBuffer.DrawProcedural(Matrix4x4.identity, matComposite, 0, MeshTopology.Triangles, 3, 2);
                         commandBuffer.EndSample(GaussianSplatRenderSystem.s_ProfCompose);
                     }
                     else

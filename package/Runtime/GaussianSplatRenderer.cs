@@ -322,7 +322,8 @@ namespace GaussianSplatting.Runtime
         public GaussianCutout[] m_Cutouts;
 
         public Shader m_ShaderSplats;
-        public Shader m_ShaderComposite;
+        public Shader m_ShaderCompositeStereo;
+        public Shader m_ShaderCompositeNonStereo;
         public Shader m_ShaderDebugPoints;
         public Shader m_ShaderDebugBoxes;
         [Tooltip("Gaussian splatting compute shader")]
@@ -527,17 +528,67 @@ namespace GaussianSplatting.Runtime
                 m_SorterArgs.resources = GpuSorting.SupportResources.Load((uint)count);
         }
 
-        bool resourcesAreSetUp => m_ShaderSplats != null && m_ShaderComposite != null && m_ShaderDebugPoints != null &&
+        bool resourcesAreSetUp => m_ShaderSplats != null && m_ShaderDebugPoints != null &&
                                   m_ShaderDebugBoxes != null && m_CSSplatUtilities != null && SystemInfo.supportsComputeShaders;
 
         public void EnsureMaterials()
         {
-            if (m_MatSplats == null && resourcesAreSetUp)
+            if (!resourcesAreSetUp)
+                return;
+            m_MatSplats ??= new Material(m_ShaderSplats) {name = "GaussianSplats"};
+            
+            // Auto-find the specific composite shaders if not assigned
+            if (m_ShaderCompositeStereo == null)
+                m_ShaderCompositeStereo = Shader.Find("Hidden/Gaussian Splatting/CompositeStereo");
+            if (m_ShaderCompositeNonStereo == null)
+                m_ShaderCompositeNonStereo = Shader.Find("Hidden/Gaussian Splatting/CompositeNonStereo");
+            
+            UpdateCompositeMaterial();
+            
+            m_MatDebugPoints ??= new Material(m_ShaderDebugPoints) {name = "GaussianDebugPoints"};
+            m_MatDebugBoxes ??= new Material(m_ShaderDebugBoxes) {name = "GaussianDebugBoxes"};
+        }
+        
+        // Updates the composite material based on XR status
+        private void UpdateCompositeMaterial()
+        {
+            if (!resourcesAreSetUp)
+                return;
+                
+            // Choose the appropriate composite shader based on XR status
+            Shader compositeShader;
+            if (XRSettings.enabled && 
+                (XRSettings.stereoRenderingMode == XRSettings.StereoRenderingMode.SinglePassInstanced ||
+                XRSettings.stereoRenderingMode == XRSettings.StereoRenderingMode.SinglePassMultiview))
             {
-                m_MatSplats = new Material(m_ShaderSplats) {name = "GaussianSplats"};
-                m_MatComposite = new Material(m_ShaderComposite) {name = "GaussianClearDstAlpha"};
-                m_MatDebugPoints = new Material(m_ShaderDebugPoints) {name = "GaussianDebugPoints"};
-                m_MatDebugBoxes = new Material(m_ShaderDebugBoxes) {name = "GaussianDebugBoxes"};
+                compositeShader = m_ShaderCompositeStereo;
+                if (compositeShader == null)
+                {
+                    Debug.LogError("Missing stereo composite shader. Please assign m_ShaderCompositeStereo.");
+                    return;
+                }
+            }
+            else
+            {
+                compositeShader = m_ShaderCompositeNonStereo;
+                if (compositeShader == null)
+                {
+                    Debug.LogError("Missing non-stereo composite shader. Please assign m_ShaderCompositeNonStereo.");
+                    return;
+                }
+            }
+            
+            // Check if we need to recreate the material
+            if (m_MatComposite == null || m_MatComposite.shader != compositeShader)
+            {
+                // Dispose of existing material if needed
+                if (m_MatComposite != null)
+                {
+                    DestroyImmediate(m_MatComposite);
+                }
+                
+                // Create new material with correct shader
+                m_MatComposite = new Material(compositeShader) {name = "GaussianClearDstAlpha"};
             }
         }
 
