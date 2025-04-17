@@ -22,6 +22,7 @@ Shader "Hidden/Gaussian Splatting/CompositeStereo"
             #pragma multi_compile_local _ UNITY_SINGLE_PASS_STEREO STEREO_INSTANCING_ON STEREO_MULTIVIEW_ON
 
             #include "UnityCG.cginc"
+            
 
             struct appdata
             {
