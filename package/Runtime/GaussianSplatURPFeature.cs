@@ -49,7 +49,9 @@ namespace GaussianSplatting.Runtime
                                 (XRSettings.stereoRenderingMode == XRSettings.StereoRenderingMode.SinglePassInstanced || 
                                  XRSettings.stereoRenderingMode == XRSettings.StereoRenderingMode.SinglePassMultiview) &&
                                 !Application.isEditor;
-                RenderTextureDescriptor rtDesc = isStereo? XRSettings.eyeTextureDesc: cameraData.cameraTargetDescriptor;
+                // Always use cameraTargetDescriptor — it matches the actual depth buffer size (including render scale).
+                // XRSettings.eyeTextureDesc returns the unscaled XR eye texture and causes dimension mismatches.
+                RenderTextureDescriptor rtDesc = cameraData.cameraTargetDescriptor;
                 rtDesc.depthBufferBits = 0;
                 rtDesc.msaaSamples = 1;
                 rtDesc.graphicsFormat = GraphicsFormat.R16G16B16A16_SFloat;
@@ -159,6 +161,10 @@ namespace GaussianSplatting.Runtime
         public override void OnCameraPreCull(ScriptableRenderer renderer, in CameraData cameraData)
         {
             m_HasCamera = false;
+            // Skip cameras that render to a custom RenderTexture (e.g. OVROverlayCanvas cameras).
+            // Splats should only composite into the main XR display camera.
+            if (cameraData.camera.targetTexture != null)
+                return;
             var system = GaussianSplatRenderSystem.instance;
             if (!system.GatherSplatsForCamera(cameraData.camera))
                 return;
