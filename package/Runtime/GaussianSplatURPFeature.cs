@@ -45,10 +45,13 @@ namespace GaussianSplatting.Runtime
                 var cameraData = frameData.Get<UniversalCameraData>();
                 var resourceData = frameData.Get<UniversalResourceData>();
 
+                // isStereo requires the actual render target to be a Tex2DArray (main XR swapchain).
+                // OVROverlayCanvas and other stereo-enabled-but-2D cameras must take the non-stereo path.
                 bool isStereo = XRSettings.enabled && cameraData.camera.stereoEnabled && 
                                 (XRSettings.stereoRenderingMode == XRSettings.StereoRenderingMode.SinglePassInstanced || 
                                  XRSettings.stereoRenderingMode == XRSettings.StereoRenderingMode.SinglePassMultiview) &&
-                                !Application.isEditor;
+                                !Application.isEditor &&
+                                cameraData.cameraTargetDescriptor.dimension == TextureDimension.Tex2DArray;
                 // Always use cameraTargetDescriptor — it matches the actual depth buffer size (including render scale).
                 // XRSettings.eyeTextureDesc returns the unscaled XR eye texture and causes dimension mismatches.
                 RenderTextureDescriptor rtDesc = cameraData.cameraTargetDescriptor;
@@ -161,10 +164,6 @@ namespace GaussianSplatting.Runtime
         public override void OnCameraPreCull(ScriptableRenderer renderer, in CameraData cameraData)
         {
             m_HasCamera = false;
-            // Skip cameras that render to a custom RenderTexture (e.g. OVROverlayCanvas cameras).
-            // Splats should only composite into the main XR display camera.
-            if (cameraData.camera.targetTexture != null)
-                return;
             var system = GaussianSplatRenderSystem.instance;
             if (!system.GatherSplatsForCamera(cameraData.camera))
                 return;
