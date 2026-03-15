@@ -319,6 +319,8 @@ namespace GaussianSplatting.Runtime
         public bool m_SortPerEye = false;
         [Tooltip("Maximum number of splats to render (0 = all). After sorting, only the closest N splats are drawn. Useful for mobile performance.")]
         public int m_MaxSplatCount = 0;
+        [Tooltip("Use half-precision (fp16) for covariance and rotation math in compute shader. Faster on mobile GPUs but may reduce quality.")]
+        public bool m_HalfPrecision = false;
 
         public RenderMode m_RenderMode = RenderMode.Splats;
         [Range(1.0f,15.0f)] public float m_PointDisplaySize = 3.0f;
@@ -355,6 +357,7 @@ namespace GaussianSplatting.Runtime
 
         GpuSorting m_Sorter;
         GpuSorting.Args m_SorterArgs;
+        LocalKeyword m_KWHalfPrecision;
 
         internal Material m_MatSplats;
         internal Material m_MatComposite;
@@ -666,6 +669,7 @@ namespace GaussianSplatting.Runtime
             if (!resourcesAreSetUp)
                 return;
 
+            m_KWHalfPrecision = new LocalKeyword(m_CSSplatUtilities, "HALF_PRECISION");
             EnsureMaterials();
             EnsureSorterAndRegister();
 
@@ -825,6 +829,11 @@ namespace GaussianSplatting.Runtime
             cmb.SetComputeFloatParam(m_CSSplatUtilities, Props.SplatOpacityScale, m_OpacityScale);
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHOrder, m_SHOrder);
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHOnly, m_SHOnly ? 1 : 0);
+
+            if (m_HalfPrecision)
+                cmb.EnableKeyword(m_CSSplatUtilities, m_KWHalfPrecision);
+            else
+                cmb.DisableKeyword(m_CSSplatUtilities, m_KWHalfPrecision);
 
             m_CSSplatUtilities.GetKernelThreadGroupSizes((int)KernelIndices.CalcViewData, out uint gsX, out _, out _);
             cmb.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.CalcViewData, (m_SplatCount + (int)gsX - 1)/(int)gsX, 1, 1);

@@ -29,6 +29,7 @@ namespace GaussianSplatting.Editor
         SerializedProperty m_PropSortNthFrame;
         SerializedProperty m_PropSortPerEye;
         SerializedProperty m_PropMaxSplatCount;
+        SerializedProperty m_PropHalfPrecision;
         SerializedProperty m_PropRenderMode;
         SerializedProperty m_PropPointDisplaySize;
         SerializedProperty m_PropCutouts;
@@ -71,6 +72,7 @@ namespace GaussianSplatting.Editor
             m_PropSortNthFrame = serializedObject.FindProperty("m_SortNthFrame");
             m_PropSortPerEye = serializedObject.FindProperty("m_SortPerEye");
             m_PropMaxSplatCount = serializedObject.FindProperty("m_MaxSplatCount");
+            m_PropHalfPrecision = serializedObject.FindProperty("m_HalfPrecision");
             m_PropRenderMode = serializedObject.FindProperty("m_RenderMode");
             m_PropPointDisplaySize = serializedObject.FindProperty("m_PointDisplaySize");
             m_PropCutouts = serializedObject.FindProperty("m_Cutouts");
@@ -117,6 +119,7 @@ namespace GaussianSplatting.Editor
             EditorGUILayout.PropertyField(m_PropSortNthFrame);
             EditorGUILayout.PropertyField(m_PropSortPerEye);
             EditorGUILayout.PropertyField(m_PropMaxSplatCount);
+            EditorGUILayout.PropertyField(m_PropHalfPrecision);
             EditorGUILayout.Space();
             GUILayout.Label("Debugging Tweaks", EditorStyles.boldLabel);
             EditorGUILayout.PropertyField(m_PropRenderMode);

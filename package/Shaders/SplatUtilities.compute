@@ -23,6 +23,7 @@
 #pragma multi_compile __ SHOULD_ASCEND
 #pragma multi_compile __ SORT_PAIRS
 #pragma multi_compile __ VULKAN
+#pragma multi_compile __ HALF_PRECISION
 #pragma kernel InitDeviceRadixSort
 #pragma kernel Upsweep
 #pragma kernel Scan
@@ -116,6 +117,7 @@ uint _SplatBitsValid;
 
 void DecomposeCovariance(float3 cov2d, out float2 v1, out float2 v2)
 {
+#ifdef HALF_PRECISION
     half diag1 = (half)cov2d.x, diag2 = (half)cov2d.z, offDiag = (half)cov2d.y;
     half mid = (half)0.5 * (diag1 + diag2);
     half radius = length(half2((diag1 - diag2) * (half)0.5, offDiag));
@@ -126,8 +128,21 @@ void DecomposeCovariance(float3 cov2d, out float2 v1, out float2 v2)
     half maxSize = (half)4096.0;
     v1 = (float2)(min(sqrt((half)2.0 * lambda1), maxSize) * diagVec);
     v2 = (float2)(min(sqrt((half)2.0 * lambda2), maxSize) * half2(diagVec.y, -diagVec.x));
+#else
+    float diag1 = cov2d.x, diag2 = cov2d.z, offDiag = cov2d.y;
+    float mid = 0.5f * (diag1 + diag2);
+    float radius = length(float2((diag1 - diag2) / 2.0, offDiag));
+    float lambda1 = mid + radius;
+    float lambda2 = max(mid - radius, 0.1);
+    float2 diagVec = normalize(float2(offDiag, lambda1 - diag1));
+    diagVec.y = -diagVec.y;
+    float maxSize = 4096.0;
+    v1 = min(sqrt(2.0 * lambda1), maxSize) * diagVec;
+    v2 = min(sqrt(2.0 * lambda2), maxSize) * float2(diagVec.y, -diagVec.x);
+#endif
 }
 
+#ifdef HALF_PRECISION
 half3x3 CalcMatrixFromRotationScale_Half(half4 rot, half3 scale)
 {
     half3x3 ms = half3x3(
@@ -150,6 +165,7 @@ void CalcCovariance3D_Half(half3x3 rotMat, out half3 sigma0, out half3 sigma1)
     sigma0 = half3(sig._m00, sig._m01, sig._m02);
     sigma1 = half3(sig._m11, sig._m12, sig._m22);
 }
+#endif
 
 bool IsSplatCut(float3 pos)
 {
@@ -193,19 +209,25 @@ SplatViewData CalculateEyeViewData(SplatData splat, float3 centerWorldPos, float
     bool behindCam = centerClipPos.w <= 0;
     if (!behindCam)
     {
+#ifdef HALF_PRECISION
         half4 boxRot = (half4)splat.rot;
         half3 boxSize = (half3)splat.scale;
-
         half3x3 splatRotScaleMat = CalcMatrixFromRotationScale_Half(boxRot, boxSize);
-
         half3 cov3d0_h, cov3d1_h;
         CalcCovariance3D_Half(splatRotScaleMat, cov3d0_h, cov3d1_h);
         half splatScale2 = (half)splatScale * (half)splatScale;
         cov3d0_h *= splatScale2;
         cov3d1_h *= splatScale2;
-
-        // Jacobian-based 2D projection stays in float for precision
         float3 cov2d = CalcCovariance2D(splat.pos, (float3)cov3d0_h, (float3)cov3d1_h, matMV, matProj, screenParams);
+#else
+        float3x3 splatRotScaleMat = CalcMatrixFromRotationScale(splat.rot, splat.scale);
+        float3 cov3d0, cov3d1;
+        CalcCovariance3D(splatRotScaleMat, cov3d0, cov3d1);
+        float splatScale2 = splatScale * splatScale;
+        cov3d0 *= splatScale2;
+        cov3d1 *= splatScale2;
+        float3 cov2d = CalcCovariance2D(splat.pos, cov3d0, cov3d1, matMV, matProj, screenParams);
+#endif
 
         DecomposeCovariance(cov2d, view.axis1, view.axis2);
 

@@ -127,9 +127,9 @@ uint2 DecodeMorton2D_16x16(uint t)      // --------EAFBGCHD
 }
 
 
-static const half SH_C1 = 0.4886025;
-static const half SH_C2[] = { 1.0925484, -1.0925484, 0.3153916, -1.0925484, 0.5462742 };
-static const half SH_C3[] = { -0.5900436, 2.8906114, -0.4570458, 0.3731763, -0.4570458, 1.4453057, -0.5900436 };
+static const float SH_C1 = 0.4886025;
+static const float SH_C2[] = { 1.0925484, -1.0925484, 0.3153916, -1.0925484, 0.5462742 };
+static const float SH_C3[] = { -0.5900436, 2.8906114, -0.4570458, 0.3731763, -0.4570458, 1.4453057, -0.5900436 };
 
 struct SplatSHData
 {
