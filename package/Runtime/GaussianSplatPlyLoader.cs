@@ -25,7 +25,6 @@ namespace GaussianSplatting.Runtime
         public Quaternion rot;
     }
 
-    [BurstCompile]
     public static class GaussianSplatPlyLoader
     {
         enum ElementType { None, Float, Double, UChar }
