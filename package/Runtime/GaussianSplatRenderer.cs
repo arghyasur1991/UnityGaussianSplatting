@@ -425,8 +425,6 @@ namespace GaussianSplatting.Runtime
         /// Toggle rendering without disabling the component (which releases GPU buffers).
         /// Checked by GatherSplatsForCamera to skip this renderer.
         /// </summary>
-        public bool renderVisible { get; set; } = true;
-
         [NonSerialized] public bool renderVisible = true;
 
         // Runtime-loaded splat format overrides (used when m_Asset is null)
