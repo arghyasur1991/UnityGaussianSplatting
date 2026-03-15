@@ -4,7 +4,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
-using Unity.Burst;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
@@ -225,7 +224,6 @@ namespace GaussianSplatting.Runtime
             return dst;
         }
 
-        [BurstCompile]
         static unsafe void ReorderSHs(int splatCount, float* data)
         {
             int splatStride = UnsafeUtility.SizeOf<InputSplatData>() / 4;
@@ -246,7 +244,6 @@ namespace GaussianSplatting.Runtime
             }
         }
 
-        [BurstCompile]
         struct LinearizeDataJob : IJobParallelFor
         {
             public NativeArray<InputSplatData> splatData;
@@ -277,7 +274,6 @@ namespace GaussianSplatting.Runtime
 
         #region COLMAP → Unity Coordinate Conversion
 
-        [BurstCompile]
         struct ConvertColmapJob : IJobParallelFor
         {
             public NativeArray<InputSplatData> splatData;
