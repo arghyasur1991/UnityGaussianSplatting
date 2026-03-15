@@ -273,13 +273,19 @@ void CSCalcViewData (uint3 id : SV_DispatchThreadID)
 
     if (_IsStereo)
     {
+        // Compute full covariance, SH, and color using the left eye (expensive).
+        // Reuse axes and color for the right eye — the IPD offset has negligible
+        // effect on projected 2D shape. Only the clip position differs per eye.
         SplatViewData viewLeft = CalculateEyeViewData(splat, centerWorldPos, _ViewProjMatrixLeft,
             _MatrixMVLeft, _MatrixProjLeft, _VecScreenParams,
             isDeleted, isCut, splatScale, opacityScale);
-        SplatViewData viewRight = CalculateEyeViewData(splat, centerWorldPos, _ViewProjMatrixRight,
-            _MatrixMVRight, _MatrixProjRight, _VecScreenParams,
-            isDeleted, isCut, splatScale, opacityScale);
-        
+
+        SplatViewData viewRight = viewLeft;
+        float4 clipRight = mul(_ViewProjMatrixRight, float4(centerWorldPos, 1));
+        if (isDeleted || isCut)
+            clipRight.w = 0;
+        viewRight.pos = clipRight;
+
         _SplatViewData[idx * 2] = viewLeft;
         _SplatViewData[idx * 2 + 1] = viewRight;
     }
