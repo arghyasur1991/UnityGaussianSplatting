@@ -103,8 +103,7 @@ half4 frag (v2f i) : SV_Target
 		i.col.rgb = lerp(i.col.rgb, selectedColor, 0.5);
 	}
 	
-    if (alpha < 1.0/255.0)
-        discard;
+    clip(alpha - 1.0/255.0);
 
     half4 res = half4(i.col.rgb * alpha, alpha);
     return res;

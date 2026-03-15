@@ -103,12 +103,12 @@ namespace GaussianSplatting.Runtime
                             // a render texture array, so we need to do it manually. Also, we need to draw the same material twice,
                             // once for each eye. TODO: Revisit this when Unity fixes the issue.
 
-                            // Render to left eye
-                            CoreUtils.SetRenderTarget(commandBuffer, data.GaussianSplatRT, ClearFlag.Color, Color.clear, 0, CubemapFace.Unknown, 0);
+                            // Render to left eye (already cleared above)
+                            CoreUtils.SetRenderTarget(commandBuffer, data.GaussianSplatRT, ClearFlag.None, Color.clear, 0, CubemapFace.Unknown, 0);
                             GaussianSplatRenderSystem.instance.RenderPreparedSplats(commandBuffer, 0);
 
                             // Render to right eye
-                            CoreUtils.SetRenderTarget(commandBuffer, data.GaussianSplatRT, ClearFlag.Color, Color.clear, 0, CubemapFace.Unknown, 1);
+                            CoreUtils.SetRenderTarget(commandBuffer, data.GaussianSplatRT, ClearFlag.None, Color.clear, 0, CubemapFace.Unknown, 1);
                             GaussianSplatRenderSystem.instance.RenderPreparedSplats(commandBuffer, 1);
                             matComposite = renderData.matComposite;
                         }

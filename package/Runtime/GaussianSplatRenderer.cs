@@ -191,6 +191,8 @@ namespace GaussianSplatting.Runtime
                     indexCount = 36;
                 if (gs.m_RenderMode == GaussianSplatRenderer.RenderMode.DebugChunkBounds)
                     instanceCount = gs.m_GpuChunksValid ? gs.m_GpuChunks.count : 0;
+                if (gs.m_MaxSplatCount > 0 && instanceCount > gs.m_MaxSplatCount)
+                    instanceCount = gs.m_MaxSplatCount;
 
                 // Store the prepared data for rendering later
                 m_LastPreparedData.renderItems.Add(new RenderItem { gs = gs, displayMat = displayMat, mpb = mpb, indexCount = indexCount, instanceCount = instanceCount, topology = topology });
@@ -315,6 +317,8 @@ namespace GaussianSplatting.Runtime
         public int m_SortNthFrame = 1;
         [Tooltip("When in VR, sort splats separately for each eye. This increases accuracy but reduces performance.")]
         public bool m_SortPerEye = false;
+        [Tooltip("Maximum number of splats to render (0 = all). After sorting, only the closest N splats are drawn. Useful for mobile performance.")]
+        public int m_MaxSplatCount = 0;
 
         public RenderMode m_RenderMode = RenderMode.Splats;
         [Range(1.0f,15.0f)] public float m_PointDisplaySize = 3.0f;
