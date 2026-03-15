@@ -410,6 +410,10 @@ namespace GaussianSplatting.Runtime
             public static readonly int SplatOtherMouseDown = Shader.PropertyToID("_SplatOtherMouseDown");
             public static readonly int ViewProjMatrixLeft = Shader.PropertyToID("_ViewProjMatrixLeft");
             public static readonly int ViewProjMatrixRight = Shader.PropertyToID("_ViewProjMatrixRight");
+            public static readonly int MatrixMVLeft = Shader.PropertyToID("_MatrixMVLeft");
+            public static readonly int MatrixMVRight = Shader.PropertyToID("_MatrixMVRight");
+            public static readonly int MatrixProjLeft = Shader.PropertyToID("_MatrixProjLeft");
+            public static readonly int MatrixProjRight = Shader.PropertyToID("_MatrixProjRight");
         }
 
         [field: NonSerialized] public bool editModified { get; private set; }
@@ -790,16 +794,20 @@ namespace GaussianSplatting.Runtime
             
             if (isStereo)
             {
-                // Get correct stereo matrices for each eye
                 Matrix4x4 stereoViewLeft = cam.GetStereoViewMatrix(Camera.StereoscopicEye.Left);
                 Matrix4x4 stereoProjLeft = GL.GetGPUProjectionMatrix(cam.GetStereoProjectionMatrix(Camera.StereoscopicEye.Left), true);
                 Matrix4x4 matVPLeft = stereoProjLeft * stereoViewLeft;
                 cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.ViewProjMatrixLeft, matVPLeft);
+                cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.MatrixMVLeft, stereoViewLeft * matO2W);
+                cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.MatrixProjLeft, stereoProjLeft);
 
                 Matrix4x4 stereoViewRight = cam.GetStereoViewMatrix(Camera.StereoscopicEye.Right);
                 Matrix4x4 stereoProjRight = GL.GetGPUProjectionMatrix(cam.GetStereoProjectionMatrix(Camera.StereoscopicEye.Right), true);
                 Matrix4x4 matVPRight = stereoProjRight * stereoViewRight;
                 cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.ViewProjMatrixRight, matVPRight);
+                cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.MatrixMVRight, stereoViewRight * matO2W);
+                cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.MatrixProjRight, stereoProjRight);
+
                 cmb.SetComputeIntParam(m_CSSplatUtilities, Props.IsStereo, 1);
             }
             else
