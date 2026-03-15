@@ -400,13 +400,13 @@ namespace GaussianSplatting.Editor
             if (string.IsNullOrWhiteSpace(path))
                 return;
 
-            int kSplatSize = UnsafeUtility.SizeOf<Utils.InputSplatData>();
+            int kSplatSize = UnsafeUtility.SizeOf<GaussianSplatting.Runtime.InputSplatData>();
             using var gpuData = new GraphicsBuffer(GraphicsBuffer.Target.Structured, gs.splatCount, kSplatSize);
 
             if (!gs.EditExportData(gpuData, bakeTransform))
                 return;
 
-            Utils.InputSplatData[] data = new Utils.InputSplatData[gpuData.count];
+            GaussianSplatting.Runtime.InputSplatData[] data = new GaussianSplatting.Runtime.InputSplatData[gpuData.count];
             gpuData.GetData(data);
 
             var gpuDeleted = gs.GpuEditDeleted;
