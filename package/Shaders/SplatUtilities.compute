@@ -23,7 +23,7 @@
 #pragma multi_compile __ SHOULD_ASCEND
 #pragma multi_compile __ SORT_PAIRS
 #pragma multi_compile __ VULKAN
-#pragma multi_compile __ HALF_PRECISION
+#pragma multi_compile_local __ HALF_PRECISION
 #pragma kernel InitDeviceRadixSort
 #pragma kernel Upsweep
 #pragma kernel Scan
