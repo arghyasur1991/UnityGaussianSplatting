@@ -57,7 +57,14 @@ v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
 		float2 axis1 = float2(f16tof32(view.packedAxis1 >> 16), f16tof32(view.packedAxis1));
 		float2 axis2 = float2(f16tof32(view.packedAxis2 >> 16), f16tof32(view.packedAxis2));
 
-		float extent = _QuadExtent;
+		// Per-splat adaptive extent: the fragment shader clips at alpha < 1/255,
+		// where alpha = exp(-r²) * opacity. Solve for r to find the exact radius
+		// beyond which all fragments would be discarded anyway.
+		// r_max = sqrt(ln(255 * opacity)). This is zero quality loss.
+		float splatAlpha = max(o.col.a, 1.0 / 255.0);
+		float extent = sqrt(max(log(255.0 * splatAlpha), 0.1));
+		extent = min(extent, _QuadExtent);
+
 		uint idx = vtxID;
 		float2 quadPos = float2(idx&1, (idx>>1)&1) * 2.0 - 1.0;
 		quadPos *= extent;

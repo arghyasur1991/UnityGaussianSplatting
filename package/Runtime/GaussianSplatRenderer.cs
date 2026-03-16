@@ -310,8 +310,8 @@ namespace GaussianSplatting.Runtime
         public float m_AdaptiveSortMoveThreshold = 0.01f;
         [Range(0.01f, 2.0f)] [Tooltip("Camera rotation threshold (degrees) to trigger a re-sort")]
         public float m_AdaptiveSortRotThreshold = 0.5f;
-        [Range(1.0f, 2.5f)] [Tooltip("Quad extent multiplier. Lower = less overdraw but clips Gaussian tails. 2.0 = original, 1.5 = ~44% less fragments")]
-        public float m_QuadExtent = 2.0f;
+        [Range(1.0f, 3.0f)] [Tooltip("Max quad extent cap. Per-splat adaptive extent auto-sizes quads based on opacity (lower opacity = smaller quad). This is just the upper bound.")]
+        public float m_QuadExtent = 3.0f;
         [Tooltip("Use half-precision (RGBA16) render target for compositing. Disable for lower bandwidth (RGBA8) at risk of alpha banding.")]
         public bool m_HighPrecisionRT = true;
         public RenderMode m_RenderMode = RenderMode.Splats;
