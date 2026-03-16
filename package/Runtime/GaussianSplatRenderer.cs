@@ -681,7 +681,8 @@ namespace GaussianSplatting.Runtime
             cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.MatrixWorldToObject, matW2O);
             bool isStereo = XRSettings.enabled && cam.stereoEnabled && 
                             (XRSettings.stereoRenderingMode == XRSettings.StereoRenderingMode.SinglePassInstanced || 
-                             XRSettings.stereoRenderingMode == XRSettings.StereoRenderingMode.SinglePassMultiview);
+                             XRSettings.stereoRenderingMode == XRSettings.StereoRenderingMode.SinglePassMultiview) &&
+                            !Application.isEditor;
             
             if (isStereo)
             {
@@ -742,7 +743,8 @@ namespace GaussianSplatting.Runtime
 
             // sort the splats
             EnsureSorterAndRegister();
-            m_Sorter.Dispatch(cmd, m_SorterArgs);
+            if (m_Sorter.Valid)
+                m_Sorter.Dispatch(cmd, m_SorterArgs);
             cmd.EndSample(s_ProfSort);
         }
 
