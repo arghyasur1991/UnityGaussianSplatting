@@ -40,6 +40,7 @@ namespace GaussianSplatting.Runtime
             public int indexCount;
             public int instanceCount;
             public MeshTopology topology;
+            public bool useIndirectDraw;
         }
         
         public class PreparedRenderData
@@ -174,6 +175,10 @@ namespace GaussianSplatting.Runtime
                 mpb.SetFloat(GaussianSplatRenderer.Props.SplatOpacityScale, gs.m_OpacityScale);
                 mpb.SetFloat(GaussianSplatRenderer.Props.SplatSize, gs.m_PointDisplaySize);
                 mpb.SetFloat(GaussianSplatRenderer.Props.QuadExtent, gs.m_QuadExtent);
+                int eyeW = XRSettings.eyeTextureWidth, eyeH = XRSettings.eyeTextureHeight;
+                float fullW = eyeW != 0 ? eyeW : cam.pixelWidth;
+                float fullH = eyeH != 0 ? eyeH : cam.pixelHeight;
+                mpb.SetVector(GaussianSplatRenderer.Props.SplatScreenParams, new Vector4(fullW, fullH, 0, 0));
                 mpb.SetInteger(GaussianSplatRenderer.Props.SHOrder, gs.m_SHOrder);
                 mpb.SetInteger(GaussianSplatRenderer.Props.SHOnly, gs.m_SHOnly ? 1 : 0);
                 mpb.SetInteger(GaussianSplatRenderer.Props.DisplayIndex, gs.m_RenderMode == GaussianSplatRenderer.RenderMode.DebugPointIndices ? 1 : 0);
@@ -188,12 +193,17 @@ namespace GaussianSplatting.Runtime
                 int indexCount = 6;
                 int instanceCount = gs.splatCount;
                 MeshTopology topology = MeshTopology.Triangles;
+                bool useIndirectDraw = false;
                 if (gs.m_RenderMode is GaussianSplatRenderer.RenderMode.DebugBoxes or GaussianSplatRenderer.RenderMode.DebugChunkBounds)
                     indexCount = 36;
                 if (gs.m_RenderMode == GaussianSplatRenderer.RenderMode.DebugChunkBounds)
                     instanceCount = gs.m_GpuChunksValid ? gs.m_GpuChunks.count : 0;
-                // Store the prepared data for rendering later
-                m_LastPreparedData.renderItems.Add(new RenderItem { gs = gs, displayMat = displayMat, mpb = mpb, indexCount = indexCount, instanceCount = instanceCount, topology = topology });
+
+                // NOTE: Indirect draw via BuildVisibleList disabled — wave-ballot prefix-sum
+                // has race conditions on Adreno causing flickering. The vertex shader NaN
+                // discard path (pos.w <= 0) is cheap enough on tile-based GPUs.
+
+                m_LastPreparedData.renderItems.Add(new RenderItem { gs = gs, displayMat = displayMat, mpb = mpb, indexCount = indexCount, instanceCount = instanceCount, topology = topology, useIndirectDraw = false });
             }
 
             m_LastPreparedData.matComposite = matComposite;
@@ -214,7 +224,10 @@ namespace GaussianSplatting.Runtime
                 item.mpb.SetInteger(GaussianSplatRenderer.Props.IsStereo, (eyeIndex == -1) ? 0 : 1);
 
                 cmb.BeginSample(s_ProfDraw);
-                cmb.DrawProcedural(item.gs.m_GpuIndexBuffer, item.gs.transform.localToWorldMatrix, item.displayMat, 0, item.topology, item.indexCount, item.instanceCount, item.mpb);
+                if (item.useIndirectDraw && item.gs.m_GpuIndirectArgs != null)
+                    cmb.DrawProceduralIndirect(item.gs.m_GpuIndexBuffer, item.gs.transform.localToWorldMatrix, item.displayMat, 0, item.topology, item.gs.m_GpuIndirectArgs, 0, item.mpb);
+                else
+                    cmb.DrawProcedural(item.gs.m_GpuIndexBuffer, item.gs.transform.localToWorldMatrix, item.displayMat, 0, item.topology, item.indexCount, item.instanceCount, item.mpb);
                 cmb.EndSample(s_ProfDraw);
             }
         }
@@ -318,6 +331,12 @@ namespace GaussianSplatting.Runtime
         public bool m_RuntimeHalfPrecisionSH = true;
         [Tooltip("Enable per-splat SH LOD: reduce SH order for small/distant splats to save bandwidth.")]
         public bool m_SHLodEnabled = true;
+        [Range(0.25f, 1.0f)] [Tooltip("Render splats at reduced resolution then upscale. Gaussians are soft, so 0.5 is often indistinguishable from 1.0.")]
+        public float m_RenderScale = 0.5f;
+        [Range(0.0f, 1.0f)] [Tooltip("Cull splats whose combined opacity × screen-area contribution is below this threshold. 0 = disabled.")]
+        public float m_ContributionCullThreshold = 0.1f;
+        [Range(2, 4)] [Tooltip("Number of radix sort passes (2 = coarse but fast, 4 = exact). 2 passes sort by top 16 bits of depth, which is usually indistinguishable.")]
+        public int m_SortPasses = 2;
         public RenderMode m_RenderMode = RenderMode.Splats;
         [Range(1.0f,15.0f)] public float m_PointDisplaySize = 3.0f;
 
@@ -426,6 +445,8 @@ namespace GaussianSplatting.Runtime
             public static readonly int IndirectArgs = Shader.PropertyToID("_IndirectArgs");
             public static readonly int IndirectIndexCount = Shader.PropertyToID("_IndirectIndexCount");
             public static readonly int SHLodEnabled = Shader.PropertyToID("_SHLodEnabled");
+            public static readonly int ContributionCullThreshold = Shader.PropertyToID("_ContributionCullThreshold");
+            public static readonly int SplatScreenParams = Shader.PropertyToID("_SplatScreenParams");
         }
 
         [field: NonSerialized] public bool editModified { get; private set; }
@@ -644,6 +665,7 @@ namespace GaussianSplatting.Runtime
             m_SorterArgs.inputKeys = m_GpuSortDistances;
             m_SorterArgs.inputValues = m_GpuSortKeys;
             m_SorterArgs.count = (uint)count;
+            m_SorterArgs.maxPasses = m_SortPasses;
             if (m_Sorter.Valid)
                 m_SorterArgs.resources = GpuSorting.SupportResources.Load((uint)count);
         }
@@ -849,6 +871,7 @@ namespace GaussianSplatting.Runtime
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHOrder, m_SHOrder);
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHOnly, m_SHOnly ? 1 : 0);
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHLodEnabled, m_SHLodEnabled ? 1 : 0);
+            cmb.SetComputeFloatParam(m_CSSplatUtilities, Props.ContributionCullThreshold, m_ContributionCullThreshold);
 
             m_CSSplatUtilities.GetKernelThreadGroupSizes((int)KernelIndices.CalcViewData, out uint gsX, out _, out _);
             cmb.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.CalcViewData, (m_SplatCount + (int)gsX - 1)/(int)gsX, 1, 1);
@@ -918,6 +941,7 @@ namespace GaussianSplatting.Runtime
 
             // sort the splats
             EnsureSorterAndRegister();
+            m_SorterArgs.maxPasses = m_SortPasses;
             if (m_Sorter.Valid)
                 m_Sorter.Dispatch(cmd, m_SorterArgs);
             cmd.EndSample(s_ProfSort);

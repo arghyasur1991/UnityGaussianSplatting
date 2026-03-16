@@ -160,21 +160,18 @@ bool IsSplatCut(float3 pos)
     return finalCut;
 }
 
+float _ContributionCullThreshold;
+
 SplatViewData CalculateEyeViewData(SplatData splat, uint splatIdx, float3 centerWorldPos,
     float4x4 viewProjMatrix, float4x4 matMV, float4x4 matProj, float4 screenParams,
-    bool isDeleted, bool isCut, float splatScale, half opacityScale)
+    float splatScale, half opacityScale, uint shFormat, uint otherStride)
 {
     SplatViewData view = (SplatViewData)0;
     
     float4 centerClipPos = mul(viewProjMatrix, float4(centerWorldPos, 1));
-    if (isDeleted || isCut)
-    {
-        centerClipPos.w = 0;
-    }
     view.pos = centerClipPos;
     
-    bool behindCam = centerClipPos.w <= 0;
-    if (!behindCam)
+    if (centerClipPos.w > 0)
     {
         float3x3 splatRotScaleMat = CalcMatrixFromRotationScale(splat.rot, splat.scale);
         float3 cov3d0, cov3d1;
@@ -191,7 +188,7 @@ SplatViewData CalculateEyeViewData(SplatData splat, uint splatIdx, float3 center
         if (_SHLodEnabled)
             effectiveSHOrder = screenSize > 8.0 ? _SHOrder : (screenSize > 3.0 ? min(_SHOrder, 1) : 0);
 
-        LoadSplatSH(splatIdx, effectiveSHOrder, splat.sh);
+        LoadSplatSH(splatIdx, effectiveSHOrder, splat.sh, shFormat, otherStride);
 
         float3 worldViewDir = _VecWorldSpaceCameraPos.xyz - centerWorldPos;
         float3 objViewDir = normalize(mul((float3x3)_MatrixWorldToObject, worldViewDir));
@@ -213,10 +210,42 @@ void CSCalcViewData (uint3 id : SV_DispatchThreadID)
     if (idx >= _SplatCount)
         return;
 
-    // Early-out: load only position first — skip full data load if behind camera or deleted
     float3 splatPos = LoadSplatPos(idx);
     float3 centerWorldPos = mul(_MatrixObjectToWorld, float4(splatPos,1)).xyz;
 
+    // Cheapest geometric checks first (no memory loads required)
+    float4x4 earlyVP = _IsStereo ? _ViewProjMatrixLeft : UNITY_MATRIX_VP;
+    float4 clipPos = mul(earlyVP, float4(centerWorldPos, 1));
+    bool behindCam = clipPos.w <= 0;
+
+    bool outsideFrustum = false;
+    if (!behindCam)
+    {
+        float3 ndc = clipPos.xyz / clipPos.w;
+        outsideFrustum = any(abs(ndc.xy) > 2.5) || ndc.z < -0.2 || ndc.z > 1.2;
+    }
+
+    float camDist = length(centerWorldPos - _VecWorldSpaceCameraPos.xyz);
+    bool tooSmall = (_VecScreenParams.x * _SplatScale * 0.5) / max(camDist, 0.01) < 0.3;
+
+    if (behindCam || outsideFrustum || tooSmall)
+    {
+        SplatViewData zero = (SplatViewData)0;
+        if (_IsStereo) { _SplatViewData[idx * 2] = zero; _SplatViewData[idx * 2 + 1] = zero; }
+        else           { _SplatViewData[idx] = zero; }
+        return;
+    }
+
+    // Now load color texture (deferred past cheap geometric checks)
+    uint3 colCoord = SplatIndexToPixelIndex(idx);
+    half4 fullCol = LoadSplatColTex(colCoord);
+    bool tooTransparent = (fullCol.a * _SplatOpacityScale) < (1.0 / 255.0);
+
+    // Contribution-based culling: small AND transparent splats contribute negligibly
+    float screenProxy = (_VecScreenParams.x * _SplatScale * 0.5) / max(camDist, 0.01);
+    bool lowContribution = (fullCol.a * screenProxy * screenProxy) < _ContributionCullThreshold;
+
+    // Deleted / cut checks (rare in runtime, most expensive last)
     bool isDeleted = false;
     if (_SplatBitsValid)
     {
@@ -226,49 +255,21 @@ void CSCalcViewData (uint3 id : SV_DispatchThreadID)
         if (wordVal & (1 << bitIdx))
             isDeleted = true;
     }
-
     bool isCut = IsSplatCut(splatPos);
 
-    // Opacity culling: read alpha from color texture before doing expensive work
-    uint3 colCoord = SplatIndexToPixelIndex(idx);
-    half opacity = LoadSplatColTex(colCoord).a;
-    bool tooTransparent = (opacity * _SplatOpacityScale) < (1.0 / 255.0);
-
-    // Quick clip-space check using left eye (or mono VP) before loading expensive data
-    float4x4 earlyVP = _IsStereo ? _ViewProjMatrixLeft : UNITY_MATRIX_VP;
-    float4 clipPos = mul(earlyVP, float4(centerWorldPos, 1));
-    bool behindCam = clipPos.w <= 0;
-
-    // Frustum check: reject splats far outside NDC with generous margin for large splats
-    bool outsideFrustum = false;
-    if (!behindCam)
-    {
-        float3 ndc = clipPos.xyz / clipPos.w;
-        float margin = 1.5;
-        outsideFrustum = any(abs(ndc.xy) > 1.0 + margin) || ndc.z < -0.2 || ndc.z > 1.2;
-    }
-
-    // Sub-pixel culling proxy: splats that project to less than ~0.3px can be skipped
-    float camDist = length(centerWorldPos - _VecWorldSpaceCameraPos.xyz);
-    bool tooSmall = (_VecScreenParams.x * _SplatScale * 0.5) / max(camDist, 0.01) < 0.3;
-
-    if (isDeleted || isCut || behindCam || outsideFrustum || tooTransparent || tooSmall)
+    if (tooTransparent || lowContribution || isDeleted || isCut)
     {
         SplatViewData zero = (SplatViewData)0;
-        if (_IsStereo)
-        {
-            _SplatViewData[idx * 2] = zero;
-            _SplatViewData[idx * 2 + 1] = zero;
-        }
-        else
-        {
-            _SplatViewData[idx] = zero;
-        }
+        if (_IsStereo) { _SplatViewData[idx * 2] = zero; _SplatViewData[idx * 2 + 1] = zero; }
+        else           { _SplatViewData[idx] = zero; }
         return;
     }
 
-    // Load geometry data without SH (SH loaded conditionally by SH LOD inside CalculateEyeViewData)
-    SplatData splat = LoadSplatDataNoSH(idx);
+    // Compute format params once, reuse in LoadSplatDataNoSH and LoadSplatSH
+    uint scaleFmt, shFormat, otherStride;
+    CalcFormatParams(scaleFmt, shFormat, otherStride);
+
+    SplatData splat = LoadSplatDataNoSH(idx, colCoord, fullCol, scaleFmt, otherStride);
     float splatScale = _SplatScale;
     half opacityScale = _SplatOpacityScale;
 
@@ -276,7 +277,7 @@ void CSCalcViewData (uint3 id : SV_DispatchThreadID)
     {
         SplatViewData viewLeft = CalculateEyeViewData(splat, idx, centerWorldPos, _ViewProjMatrixLeft,
             _MatrixMVLeft, _MatrixProjLeft, _VecScreenParams,
-            false, false, splatScale, opacityScale);
+            splatScale, opacityScale, shFormat, otherStride);
 
         SplatViewData viewRight = viewLeft;
         float4 clipRight = mul(_ViewProjMatrixRight, float4(centerWorldPos, 1));
@@ -289,7 +290,7 @@ void CSCalcViewData (uint3 id : SV_DispatchThreadID)
     {
         _SplatViewData[idx] = CalculateEyeViewData(splat, idx, centerWorldPos, UNITY_MATRIX_VP,
             _MatrixMV, UNITY_MATRIX_P, _VecScreenParams,
-            false, false, splatScale, opacityScale);
+            splatScale, opacityScale, shFormat, otherStride);
     }
 }
 
@@ -819,17 +820,24 @@ void CSInitIndirectArgs (uint3 id : SV_DispatchThreadID)
 void CSBuildVisibleList (uint3 id : SV_DispatchThreadID)
 {
     uint sortIdx = id.x;
-    if (sortIdx >= _SplatCount)
-        return;
-
-    uint origIdx = _SplatSortKeys[sortIdx];
-    uint viewIdx = _IsStereo ? origIdx * 2 : origIdx;
-    float w = _SplatViewData[viewIdx].pos.w;
-
-    if (w > 0)
+    bool isVisible = sortIdx < _SplatCount;
+    uint origIdx = 0;
+    if (isVisible)
     {
-        uint slot;
-        InterlockedAdd(_IndirectArgs[1], 1, slot);
-        _VisibleIndices[slot] = origIdx;
+        origIdx = _SplatSortKeys[sortIdx];
+        uint viewIdx = _IsStereo ? origIdx * 2 : origIdx;
+        isVisible = _SplatViewData[viewIdx].pos.w > 0;
     }
+
+    // Wave-level prefix sum preserves sort order within each wave
+    uint waveVisCount = WaveActiveCountBits(isVisible);
+    uint wavePrefix = WavePrefixCountBits(isVisible);
+
+    uint waveOffset = 0;
+    if (WaveIsFirstLane())
+        InterlockedAdd(_IndirectArgs[1], waveVisCount, waveOffset);
+    waveOffset = WaveReadLaneFirst(waveOffset);
+
+    if (isVisible)
+        _VisibleIndices[waveOffset + wavePrefix] = origIdx;
 }

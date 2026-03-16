@@ -34,6 +34,7 @@ uint _SplatBitsValid;
 uint _EyeIndex;
 uint _IsStereo;
 float _QuadExtent;
+float4 _SplatScreenParams;
 v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
 {
 	v2f o = (v2f)0;
@@ -71,7 +72,7 @@ v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
 
 		o.pos = quadPos;
 
-		float2 deltaScreenPos = (quadPos.x * axis1 + quadPos.y * axis2) * 2 / _ScreenParams.xy;
+		float2 deltaScreenPos = (quadPos.x * axis1 + quadPos.y * axis2) * 2 / _SplatScreenParams.xy;
 		o.vertex = centerClipPos;
 		o.vertex.xy += deltaScreenPos * centerClipPos.w;
 
