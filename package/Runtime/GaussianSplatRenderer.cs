@@ -40,7 +40,6 @@ namespace GaussianSplatting.Runtime
             public int indexCount;
             public int instanceCount;
             public MeshTopology topology;
-            public bool useIndirectDraw;
         }
         
         public class PreparedRenderData
@@ -189,19 +188,12 @@ namespace GaussianSplatting.Runtime
                 int indexCount = 6;
                 int instanceCount = gs.splatCount;
                 MeshTopology topology = MeshTopology.Triangles;
-                bool useIndirectDraw = false;
                 if (gs.m_RenderMode is GaussianSplatRenderer.RenderMode.DebugBoxes or GaussianSplatRenderer.RenderMode.DebugChunkBounds)
                     indexCount = 36;
                 if (gs.m_RenderMode == GaussianSplatRenderer.RenderMode.DebugChunkBounds)
                     instanceCount = gs.m_GpuChunksValid ? gs.m_GpuChunks.count : 0;
-                else if (gs.m_GpuVisibleIndices != null && gs.m_GpuIndirectArgs != null)
-                {
-                    gs.BuildVisibleList(cmb, indexCount);
-                    mpb.SetBuffer(GaussianSplatRenderer.Props.VisibleIndices, gs.m_GpuVisibleIndices);
-                    useIndirectDraw = true;
-                }
                 // Store the prepared data for rendering later
-                m_LastPreparedData.renderItems.Add(new RenderItem { gs = gs, displayMat = displayMat, mpb = mpb, indexCount = indexCount, instanceCount = instanceCount, topology = topology, useIndirectDraw = useIndirectDraw });
+                m_LastPreparedData.renderItems.Add(new RenderItem { gs = gs, displayMat = displayMat, mpb = mpb, indexCount = indexCount, instanceCount = instanceCount, topology = topology });
             }
 
             m_LastPreparedData.matComposite = matComposite;
@@ -222,16 +214,7 @@ namespace GaussianSplatting.Runtime
                 item.mpb.SetInteger(GaussianSplatRenderer.Props.IsStereo, (eyeIndex == -1) ? 0 : 1);
 
                 cmb.BeginSample(s_ProfDraw);
-                if (item.useIndirectDraw)
-                {
-                    item.mpb.SetInteger("_UseVisibleList", 1);
-                    cmb.DrawProceduralIndirect(item.gs.m_GpuIndexBuffer, item.gs.transform.localToWorldMatrix, item.displayMat, 0, item.topology, item.gs.m_GpuIndirectArgs, 0, item.mpb);
-                }
-                else
-                {
-                    item.mpb.SetInteger("_UseVisibleList", 0);
-                    cmb.DrawProcedural(item.gs.m_GpuIndexBuffer, item.gs.transform.localToWorldMatrix, item.displayMat, 0, item.topology, item.indexCount, item.instanceCount, item.mpb);
-                }
+                cmb.DrawProcedural(item.gs.m_GpuIndexBuffer, item.gs.transform.localToWorldMatrix, item.displayMat, 0, item.topology, item.indexCount, item.instanceCount, item.mpb);
                 cmb.EndSample(s_ProfDraw);
             }
         }
@@ -848,6 +831,10 @@ namespace GaussianSplatting.Runtime
             else
             {
                 cmb.SetComputeIntParam(m_CSSplatUtilities, Props.IsStereo, 0);
+                Matrix4x4 matProj = GL.GetGPUProjectionMatrix(cam.projectionMatrix, true);
+                Matrix4x4 matVP = matProj * matView;
+                cmb.SetComputeMatrixParam(m_CSSplatUtilities, "unity_MatrixVP", matVP);
+                cmb.SetComputeMatrixParam(m_CSSplatUtilities, "glstate_matrix_projection", matProj);
             }
 
             cmb.SetComputeVectorParam(m_CSSplatUtilities, Props.VecScreenParams, screenPar);

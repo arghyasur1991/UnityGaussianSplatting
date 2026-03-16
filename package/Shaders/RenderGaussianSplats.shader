@@ -20,7 +20,6 @@ CGPROGRAM
 #include "GaussianSplatting.hlsl"
 
 StructuredBuffer<uint> _OrderBuffer;
-StructuredBuffer<uint> _VisibleIndices;
 
 struct v2f
 {
@@ -34,12 +33,11 @@ ByteAddressBuffer _SplatSelectedBits;
 uint _SplatBitsValid;
 uint _EyeIndex;
 uint _IsStereo;
-uint _UseVisibleList;
 float _QuadExtent;
 v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
 {
 	v2f o = (v2f)0;
-	instID = _UseVisibleList ? _VisibleIndices[instID] : _OrderBuffer[instID];
+	instID = _OrderBuffer[instID];
 	uint eyeIndex = _EyeIndex;
 	uint viewIndex = _IsStereo ? instID * 2 + eyeIndex : instID;
 	SplatViewData view = _SplatViewData[viewIndex];
