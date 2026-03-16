@@ -299,11 +299,11 @@ namespace GaussianSplatting.Runtime
         [Tooltip("Additional scaling factor for opacity")]
         public float m_OpacityScale = 1.0f;
         [Range(0, 3)] [Tooltip("Spherical Harmonics order to use")]
-        public int m_SHOrder = 3;
+        public int m_SHOrder = 0;
         [Tooltip("Show only Spherical Harmonics contribution, using gray color")]
         public bool m_SHOnly;
         [Range(1,30)] [Tooltip("Sort splats only every N frames")]
-        public int m_SortNthFrame = 1;
+        public int m_SortNthFrame = 10;
         [Tooltip("When enabled, sort is skipped when the camera is nearly stationary (overrides Sort Nth Frame)")]
         public bool m_AdaptiveSort = true;
         [Range(0.001f, 0.1f)] [Tooltip("Camera movement threshold (meters) to trigger a re-sort")]
@@ -311,9 +311,9 @@ namespace GaussianSplatting.Runtime
         [Range(0.01f, 2.0f)] [Tooltip("Camera rotation threshold (degrees) to trigger a re-sort")]
         public float m_AdaptiveSortRotThreshold = 0.5f;
         [Range(1.0f, 3.0f)] [Tooltip("Max quad extent cap. Per-splat adaptive extent auto-sizes quads based on opacity (lower opacity = smaller quad). This is just the upper bound.")]
-        public float m_QuadExtent = 3.0f;
+        public float m_QuadExtent = 2.0f;
         [Tooltip("Use half-precision (RGBA16) render target for compositing. Disable for lower bandwidth (RGBA8) at risk of alpha banding.")]
-        public bool m_HighPrecisionRT = true;
+        public bool m_HighPrecisionRT = false;
         [Tooltip("When loading PLY at runtime, convert SH data to Float16. Halves SH GPU memory and bandwidth at slight quality cost.")]
         public bool m_RuntimeHalfPrecisionSH = true;
         [Tooltip("Enable per-splat SH LOD: reduce SH order for small/distant splats to save bandwidth.")]
