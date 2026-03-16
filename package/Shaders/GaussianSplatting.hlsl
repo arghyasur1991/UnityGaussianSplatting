@@ -610,7 +610,8 @@ SplatData LoadSplatData(uint idx)
 struct SplatViewData
 {
     float4 pos;
-    float2 axis1, axis2;
+    uint packedAxis1; // two fp16 packed: (axis1.x << 16) | axis1.y
+    uint packedAxis2; // two fp16 packed: (axis2.x << 16) | axis2.y
     uint2 color; // 4xFP16
 };
 
