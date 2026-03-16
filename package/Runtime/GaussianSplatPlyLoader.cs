@@ -10,6 +10,7 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
+using half3 = Unity.Mathematics.half3;
 
 namespace GaussianSplatting.Runtime
 {
@@ -68,7 +69,9 @@ namespace GaussianSplatting.Runtime
             var posData = BuildPositionData(splats);
             var otherData = BuildOtherData(splats);
             var (colorData, texWidth, texHeight) = BuildColorData(splats);
-            var shData = BuildSHData(splats);
+            bool useHalfSH = renderer.m_RuntimeHalfPrecisionSH;
+            var shData = useHalfSH ? BuildSHDataFloat16(splats) : BuildSHData(splats);
+            var shFormat = useHalfSH ? GaussianSplatAsset.SHFormat.Float16 : GaussianSplatAsset.SHFormat.Float32;
 
             Vector3 boundsMin = new Vector3(float.MaxValue, float.MaxValue, float.MaxValue);
             Vector3 boundsMax = new Vector3(float.MinValue, float.MinValue, float.MinValue);
@@ -86,7 +89,7 @@ namespace GaussianSplatting.Runtime
                 texWidth, texHeight,
                 GaussianSplatAsset.VectorFormat.Float32,
                 GaussianSplatAsset.VectorFormat.Float32,
-                GaussianSplatAsset.SHFormat.Float32,
+                shFormat,
                 GaussianSplatAsset.ColorFormat.Float32x4,
                 boundsMin, boundsMax
             );
@@ -96,7 +99,7 @@ namespace GaussianSplatting.Runtime
             colorData.Dispose();
             shData.Dispose();
 
-            Debug.Log($"[GaussianSplatPlyLoader] Loaded {vertexCount} splats from PLY ({plyBytes.Length / (1024f * 1024f):F1}MB)");
+            Debug.Log($"[GaussianSplatPlyLoader] Loaded {vertexCount} splats from PLY ({plyBytes.Length / (1024f * 1024f):F1}MB), SH format: {shFormat}");
         }
 
         #region PLY Header Parsing
@@ -394,6 +397,31 @@ namespace GaussianSplatting.Runtime
                         sh5 = s.sh5, sh6 = s.sh6, sh7 = s.sh7, sh8 = s.sh8,
                         sh9 = s.sh9, shA = s.shA, shB = s.shB, shC = s.shC,
                         shD = s.shD, shE = s.shE, shF = s.shF,
+                        shPadding = default
+                    };
+                }
+            }
+            return data;
+        }
+
+        static half3 ToHalf3(Vector3 v) => new half3((half)v.x, (half)v.y, (half)v.z);
+
+        static NativeArray<byte> BuildSHDataFloat16(NativeArray<InputSplatData> splats)
+        {
+            int stride = UnsafeUtility.SizeOf<GaussianSplatAsset.SHTableItemFloat16>();
+            var data = new NativeArray<byte>(splats.Length * stride, Allocator.TempJob);
+            unsafe
+            {
+                var ptr = (GaussianSplatAsset.SHTableItemFloat16*)data.GetUnsafePtr();
+                for (int i = 0; i < splats.Length; i++)
+                {
+                    var s = splats[i];
+                    ptr[i] = new GaussianSplatAsset.SHTableItemFloat16
+                    {
+                        sh1 = ToHalf3(s.sh1), sh2 = ToHalf3(s.sh2), sh3 = ToHalf3(s.sh3), sh4 = ToHalf3(s.sh4),
+                        sh5 = ToHalf3(s.sh5), sh6 = ToHalf3(s.sh6), sh7 = ToHalf3(s.sh7), sh8 = ToHalf3(s.sh8),
+                        sh9 = ToHalf3(s.sh9), shA = ToHalf3(s.shA), shB = ToHalf3(s.shB), shC = ToHalf3(s.shC),
+                        shD = ToHalf3(s.shD), shE = ToHalf3(s.shE), shF = ToHalf3(s.shF),
                         shPadding = default
                     };
                 }

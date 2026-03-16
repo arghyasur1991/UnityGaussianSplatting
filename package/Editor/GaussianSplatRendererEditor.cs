@@ -27,6 +27,13 @@ namespace GaussianSplatting.Editor
         SerializedProperty m_PropSHOrder;
         SerializedProperty m_PropSHOnly;
         SerializedProperty m_PropSortNthFrame;
+        SerializedProperty m_PropAdaptiveSort;
+        SerializedProperty m_PropAdaptiveSortMoveThreshold;
+        SerializedProperty m_PropAdaptiveSortRotThreshold;
+        SerializedProperty m_PropQuadExtent;
+        SerializedProperty m_PropHighPrecisionRT;
+        SerializedProperty m_PropRuntimeHalfPrecisionSH;
+        SerializedProperty m_PropSHLodEnabled;
         SerializedProperty m_PropRenderMode;
         SerializedProperty m_PropPointDisplaySize;
         SerializedProperty m_PropCutouts;
@@ -67,6 +74,13 @@ namespace GaussianSplatting.Editor
             m_PropSHOrder = serializedObject.FindProperty("m_SHOrder");
             m_PropSHOnly = serializedObject.FindProperty("m_SHOnly");
             m_PropSortNthFrame = serializedObject.FindProperty("m_SortNthFrame");
+            m_PropAdaptiveSort = serializedObject.FindProperty("m_AdaptiveSort");
+            m_PropAdaptiveSortMoveThreshold = serializedObject.FindProperty("m_AdaptiveSortMoveThreshold");
+            m_PropAdaptiveSortRotThreshold = serializedObject.FindProperty("m_AdaptiveSortRotThreshold");
+            m_PropQuadExtent = serializedObject.FindProperty("m_QuadExtent");
+            m_PropHighPrecisionRT = serializedObject.FindProperty("m_HighPrecisionRT");
+            m_PropRuntimeHalfPrecisionSH = serializedObject.FindProperty("m_RuntimeHalfPrecisionSH");
+            m_PropSHLodEnabled = serializedObject.FindProperty("m_SHLodEnabled");
             m_PropRenderMode = serializedObject.FindProperty("m_RenderMode");
             m_PropPointDisplaySize = serializedObject.FindProperty("m_PointDisplaySize");
             m_PropCutouts = serializedObject.FindProperty("m_Cutouts");
@@ -111,6 +125,18 @@ namespace GaussianSplatting.Editor
             EditorGUILayout.PropertyField(m_PropSHOrder);
             EditorGUILayout.PropertyField(m_PropSHOnly);
             EditorGUILayout.PropertyField(m_PropSortNthFrame);
+            EditorGUILayout.PropertyField(m_PropAdaptiveSort);
+            if (m_PropAdaptiveSort.boolValue)
+            {
+                EditorGUI.indentLevel++;
+                EditorGUILayout.PropertyField(m_PropAdaptiveSortMoveThreshold);
+                EditorGUILayout.PropertyField(m_PropAdaptiveSortRotThreshold);
+                EditorGUI.indentLevel--;
+            }
+            EditorGUILayout.PropertyField(m_PropQuadExtent);
+            EditorGUILayout.PropertyField(m_PropHighPrecisionRT);
+            EditorGUILayout.PropertyField(m_PropRuntimeHalfPrecisionSH);
+            EditorGUILayout.PropertyField(m_PropSHLodEnabled);
             EditorGUILayout.Space();
             GUILayout.Label("Debugging Tweaks", EditorStyles.boldLabel);
             EditorGUILayout.PropertyField(m_PropRenderMode);

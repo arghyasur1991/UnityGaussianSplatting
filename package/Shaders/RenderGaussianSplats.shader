@@ -33,6 +33,7 @@ ByteAddressBuffer _SplatSelectedBits;
 uint _SplatBitsValid;
 uint _EyeIndex;
 uint _IsStereo;
+float _QuadExtent;
 v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
 {
 	v2f o = (v2f)0;
@@ -53,13 +54,24 @@ v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
 		o.col.b = f16tof32(view.color.y >> 16);
 		o.col.a = f16tof32(view.color.y);
 
+		float2 axis1 = float2(f16tof32(view.packedAxis1 >> 16), f16tof32(view.packedAxis1));
+		float2 axis2 = float2(f16tof32(view.packedAxis2 >> 16), f16tof32(view.packedAxis2));
+
+		// Per-splat adaptive extent: the fragment shader clips at alpha < 1/255,
+		// where alpha = exp(-r²) * opacity. Solve for r to find the exact radius
+		// beyond which all fragments would be discarded anyway.
+		// r_max = sqrt(ln(255 * opacity)). This is zero quality loss.
+		float splatAlpha = max(o.col.a, 1.0 / 255.0);
+		float extent = sqrt(max(log(255.0 * splatAlpha), 0.1));
+		extent = min(extent, _QuadExtent);
+
 		uint idx = vtxID;
 		float2 quadPos = float2(idx&1, (idx>>1)&1) * 2.0 - 1.0;
-		quadPos *= 2;
+		quadPos *= extent;
 
 		o.pos = quadPos;
 
-		float2 deltaScreenPos = (quadPos.x * view.axis1 + quadPos.y * view.axis2) * 2 / _ScreenParams.xy;
+		float2 deltaScreenPos = (quadPos.x * axis1 + quadPos.y * axis2) * 2 / _ScreenParams.xy;
 		o.vertex = centerClipPos;
 		o.vertex.xy += deltaScreenPos * centerClipPos.w;
 
@@ -82,7 +94,7 @@ v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
 half4 frag (v2f i) : SV_Target
 {
 	float power = -dot(i.pos, i.pos);
-	half alpha = exp(power);
+	half alpha = exp2(power * 1.442695);
 	if (i.col.a >= 0)
 	{
 		alpha = saturate(alpha * i.col.a);
