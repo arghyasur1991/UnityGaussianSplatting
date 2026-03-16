@@ -490,7 +490,7 @@ namespace GaussianSplatting.Runtime
             m_RuntimeLoaded ||
             (m_GpuPosData != null && m_GpuOtherData != null && m_GpuChunks != null);
 
-        const int kGpuViewDataSize = 28;
+        const int kGpuViewDataSize = 32;
 
         void CreateResourcesForAsset()
         {

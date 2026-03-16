@@ -833,7 +833,7 @@ struct SplatViewData
     float4 pos;
     uint packedAxis1; // two fp16 packed: (axis1.x << 16) | axis1.y
     uint packedAxis2; // two fp16 packed: (axis2.x << 16) | axis2.y
-    uint packedColor; // RGBA8: (R << 24) | (G << 16) | (B << 8) | A
+    uint2 color; // 4xFP16
 };
 
 // If we are rendering into backbuffer directly (e.g. HDR off, no postprocessing),

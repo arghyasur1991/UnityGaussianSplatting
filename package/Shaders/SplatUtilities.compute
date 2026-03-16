@@ -187,12 +187,6 @@ SplatViewData CalculateEyeViewData(SplatData splat, uint splatIdx, float3 center
         float screenSize;
         DecomposeCovariance(cov2d, view.packedAxis1, view.packedAxis2, screenSize);
 
-        if (screenSize < 0.5)
-        {
-            view.pos.w = 0;
-            return view;
-        }
-
         uint effectiveSHOrder = _SHOrder;
         if (_SHLodEnabled)
             effectiveSHOrder = screenSize > 8.0 ? _SHOrder : (screenSize > 3.0 ? min(_SHOrder, 1) : 0);
@@ -204,11 +198,9 @@ SplatViewData CalculateEyeViewData(SplatData splat, uint splatIdx, float3 center
 
         half4 col;
         col.rgb = ShadeSH(splat.sh, objViewDir, effectiveSHOrder, _SHOnly != 0);
-        col.a = saturate(splat.opacity * opacityScale);
-        view.packedColor = (uint(saturate(col.r) * 255.0 + 0.5) << 24)
-                         | (uint(saturate(col.g) * 255.0 + 0.5) << 16)
-                         | (uint(saturate(col.b) * 255.0 + 0.5) << 8)
-                         |  uint(col.a * 255.0 + 0.5);
+        col.a = min(splat.opacity * opacityScale, 65000);
+        view.color.x = (f32tof16(col.r) << 16) | f32tof16(col.g);
+        view.color.y = (f32tof16(col.b) << 16) | f32tof16(col.a);
     }
     
     return view;
