@@ -36,6 +36,7 @@ namespace GaussianSplatting.Runtime
                 internal TextureHandle SourceDepth;
                 internal TextureHandle GaussianSplatRT;
                 internal bool IsStereo;
+                internal bool IsScaled;
             }
 
             public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
@@ -75,6 +76,7 @@ namespace GaussianSplatting.Runtime
                 passData.SourceDepth = resourceData.activeDepthTexture;
                 passData.GaussianSplatRT = gaussianSplatRT;
                 passData.IsStereo = isStereo;
+                passData.IsScaled = renderScale < 1.0f;
 
                 builder.UseTexture(resourceData.activeColorTexture, AccessFlags.ReadWrite);
                 builder.UseTexture(resourceData.activeDepthTexture);
@@ -123,7 +125,10 @@ namespace GaussianSplatting.Runtime
                     {
                         // Single-eye rendering
                         commandBuffer.SetGlobalTexture(s_gaussianSplatRT, data.GaussianSplatRT);
-                        CoreUtils.SetRenderTarget(commandBuffer, data.GaussianSplatRT, data.SourceDepth, ClearFlag.Color, Color.clear);
+                        if (data.IsScaled)
+                            CoreUtils.SetRenderTarget(commandBuffer, data.GaussianSplatRT, ClearFlag.Color, Color.clear);
+                        else
+                            CoreUtils.SetRenderTarget(commandBuffer, data.GaussianSplatRT, data.SourceDepth, ClearFlag.Color, Color.clear);
                         Material matComposite = GaussianSplatRenderSystem.instance.SortAndRenderSplats(data.CameraData.camera, commandBuffer);
                         
                         commandBuffer.BeginSample(GaussianSplatRenderSystem.s_ProfCompose);
