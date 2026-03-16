@@ -1,4 +1,4 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -13,18 +13,6 @@ using UnityEngine.Assertions;
 
 namespace GaussianSplatting.Editor.Utils
 {
-    // input file splat data is read into this format
-    public struct InputSplatData
-    {
-        public Vector3 pos;
-        public Vector3 nor;
-        public Vector3 dc0;
-        public Vector3 sh1, sh2, sh3, sh4, sh5, sh6, sh7, sh8, sh9, shA, shB, shC, shD, shE, shF;
-        public float opacity;
-        public Vector3 scale;
-        public Quaternion rot;
-    }
-
     [BurstCompile]
     public class GaussianFileReader
     {
@@ -49,10 +37,17 @@ namespace GaussianSplatting.Editor.Utils
                 NativeArray<byte> plyRawData;
                 List<(string, PLYFileReader.ElementType)> attributes;
                 PLYFileReader.ReadFile(filePath, out var splatCount, out var vertexStride, out attributes, out plyRawData);
-                string attrError = CheckPLYAttributes(attributes);
-                if (!string.IsNullOrEmpty(attrError))
-                    throw new IOException($"PLY file is probably not a Gaussian Splat file? Missing properties: {attrError}");
-                splats = PLYDataToSplats(plyRawData, splatCount, vertexStride, attributes);
+                try
+                {
+                    string attrError = CheckPLYAttributes(attributes);
+                    if (!string.IsNullOrEmpty(attrError))
+                        throw new IOException($"PLY file is probably not a Gaussian Splat file? Missing properties: {attrError}");
+                    splats = PLYDataToSplats(plyRawData, splatCount, vertexStride, attributes);
+                }
+                finally
+                {
+                    plyRawData.Dispose();
+                }
                 ReorderSHs(splatCount, (float*)splats.GetUnsafePtr());
                 LinearizeData(splats);
                 return;
