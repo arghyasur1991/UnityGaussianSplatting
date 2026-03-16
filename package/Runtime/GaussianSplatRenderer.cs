@@ -314,6 +314,10 @@ namespace GaussianSplatting.Runtime
         public float m_QuadExtent = 3.0f;
         [Tooltip("Use half-precision (RGBA16) render target for compositing. Disable for lower bandwidth (RGBA8) at risk of alpha banding.")]
         public bool m_HighPrecisionRT = true;
+        [Tooltip("When loading PLY at runtime, convert SH data to Float16. Halves SH GPU memory and bandwidth at slight quality cost.")]
+        public bool m_RuntimeHalfPrecisionSH = true;
+        [Tooltip("Enable per-splat SH LOD: reduce SH order for small/distant splats to save bandwidth.")]
+        public bool m_SHLodEnabled = true;
         public RenderMode m_RenderMode = RenderMode.Splats;
         [Range(1.0f,15.0f)] public float m_PointDisplaySize = 3.0f;
 
@@ -421,6 +425,7 @@ namespace GaussianSplatting.Runtime
             public static readonly int VisibleIndices = Shader.PropertyToID("_VisibleIndices");
             public static readonly int IndirectArgs = Shader.PropertyToID("_IndirectArgs");
             public static readonly int IndirectIndexCount = Shader.PropertyToID("_IndirectIndexCount");
+            public static readonly int SHLodEnabled = Shader.PropertyToID("_SHLodEnabled");
         }
 
         [field: NonSerialized] public bool editModified { get; private set; }
@@ -485,7 +490,7 @@ namespace GaussianSplatting.Runtime
             m_RuntimeLoaded ||
             (m_GpuPosData != null && m_GpuOtherData != null && m_GpuChunks != null);
 
-        const int kGpuViewDataSize = 32;
+        const int kGpuViewDataSize = 28;
 
         void CreateResourcesForAsset()
         {
@@ -843,6 +848,7 @@ namespace GaussianSplatting.Runtime
             cmb.SetComputeFloatParam(m_CSSplatUtilities, Props.SplatOpacityScale, m_OpacityScale);
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHOrder, m_SHOrder);
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHOnly, m_SHOnly ? 1 : 0);
+            cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHLodEnabled, m_SHLodEnabled ? 1 : 0);
 
             m_CSSplatUtilities.GetKernelThreadGroupSizes((int)KernelIndices.CalcViewData, out uint gsX, out _, out _);
             cmb.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.CalcViewData, (m_SplatCount + (int)gsX - 1)/(int)gsX, 1, 1);

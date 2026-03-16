@@ -49,10 +49,10 @@ v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
 	}
 	else
 	{
-		o.col.r = f16tof32(view.color.x >> 16);
-		o.col.g = f16tof32(view.color.x);
-		o.col.b = f16tof32(view.color.y >> 16);
-		o.col.a = f16tof32(view.color.y);
+		o.col.r = ((view.packedColor >> 24) & 0xFF) / 255.0;
+		o.col.g = ((view.packedColor >> 16) & 0xFF) / 255.0;
+		o.col.b = ((view.packedColor >> 8)  & 0xFF) / 255.0;
+		o.col.a = (view.packedColor & 0xFF) / 255.0;
 
 		float2 axis1 = float2(f16tof32(view.packedAxis1 >> 16), f16tof32(view.packedAxis1));
 		float2 axis2 = float2(f16tof32(view.packedAxis2 >> 16), f16tof32(view.packedAxis2));
@@ -94,7 +94,7 @@ v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
 half4 frag (v2f i) : SV_Target
 {
 	float power = -dot(i.pos, i.pos);
-	half alpha = exp(power);
+	half alpha = exp2(power * 1.442695);
 	if (i.col.a >= 0)
 	{
 		alpha = saturate(alpha * i.col.a);
