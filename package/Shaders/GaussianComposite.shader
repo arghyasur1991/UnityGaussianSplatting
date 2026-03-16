@@ -47,17 +47,18 @@ v2f vert (uint vtxID : SV_VertexID)
 UNITY_DECLARE_TEX2DARRAY(_GaussianSplatRT);
 #else
 Texture2D _GaussianSplatRT;
+SamplerState sampler_LinearClamp;
 #endif
 
 int _CustomStereoEyeIndex;
 half4 frag (v2f i) : SV_Target
 {
     half4 col;
+    float2 uv = float2(i.vertex.x / _ScreenParams.x, i.vertex.y / _ScreenParams.y);
     #if defined(UNITY_SINGLE_PASS_STEREO) || defined(STEREO_INSTANCING_ON) || defined(STEREO_MULTIVIEW_ON)
-        float2 normalizedUV = float2(i.vertex.x / _ScreenParams.x, i.vertex.y / _ScreenParams.y);
-        col = UNITY_SAMPLE_TEX2DARRAY(_GaussianSplatRT, float3(normalizedUV, _CustomStereoEyeIndex));
+        col = UNITY_SAMPLE_TEX2DARRAY(_GaussianSplatRT, float3(uv, _CustomStereoEyeIndex));
     #else
-        col = _GaussianSplatRT.Load(int3(i.vertex.xy, 0));
+        col = _GaussianSplatRT.SampleLevel(sampler_LinearClamp, uv, 0);
     #endif
 
     return float4(GammaToLinearSpace(col.rgb / col.a), col.a);
