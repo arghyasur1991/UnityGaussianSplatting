@@ -195,15 +195,11 @@ namespace GaussianSplatting.Runtime
                 if (gs.m_RenderMode == GaussianSplatRenderer.RenderMode.DebugChunkBounds)
                     instanceCount = gs.m_GpuChunksValid ? gs.m_GpuChunks.count : 0;
 
-                // Build compact visible list for indirect draw (splat mode only)
-                if (gs.m_RenderMode == GaussianSplatRenderer.RenderMode.Splats && gs.m_GpuVisibleIndices != null)
-                {
-                    gs.BuildVisibleList(cmb, indexCount);
-                    mpb.SetBuffer(GaussianSplatRenderer.Props.OrderBuffer, gs.m_GpuVisibleIndices);
-                    useIndirectDraw = true;
-                }
+                // NOTE: Indirect draw via BuildVisibleList disabled — wave-ballot prefix-sum
+                // has race conditions on Adreno causing flickering. The vertex shader NaN
+                // discard path (pos.w <= 0) is cheap enough on tile-based GPUs.
 
-                m_LastPreparedData.renderItems.Add(new RenderItem { gs = gs, displayMat = displayMat, mpb = mpb, indexCount = indexCount, instanceCount = instanceCount, topology = topology, useIndirectDraw = useIndirectDraw });
+                m_LastPreparedData.renderItems.Add(new RenderItem { gs = gs, displayMat = displayMat, mpb = mpb, indexCount = indexCount, instanceCount = instanceCount, topology = topology, useIndirectDraw = false });
             }
 
             m_LastPreparedData.matComposite = matComposite;
@@ -822,11 +818,7 @@ namespace GaussianSplatting.Runtime
             Matrix4x4 matW2O = tr.worldToLocalMatrix;
             int screenW = cam.pixelWidth, screenH = cam.pixelHeight;
             int eyeW = XRSettings.eyeTextureWidth, eyeH = XRSettings.eyeTextureHeight;
-            float baseW = eyeW != 0 ? eyeW : screenW;
-            float baseH = eyeH != 0 ? eyeH : screenH;
-            Vector4 screenPar = new Vector4(
-                Mathf.Max(1, Mathf.RoundToInt(baseW * m_RenderScale)),
-                Mathf.Max(1, Mathf.RoundToInt(baseH * m_RenderScale)), 0, 0);
+            Vector4 screenPar = new Vector4(eyeW != 0 ? eyeW : screenW, eyeH != 0 ? eyeH : screenH, 0, 0);
             Vector4 camPos = cam.transform.position;
 
             // calculate view dependent data for each splat
