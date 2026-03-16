@@ -34,6 +34,9 @@ namespace GaussianSplatting.Editor
         SerializedProperty m_PropHighPrecisionRT;
         SerializedProperty m_PropRuntimeHalfPrecisionSH;
         SerializedProperty m_PropSHLodEnabled;
+        SerializedProperty m_PropRenderScale;
+        SerializedProperty m_PropContributionCullThreshold;
+        SerializedProperty m_PropSortPasses;
         SerializedProperty m_PropRenderMode;
         SerializedProperty m_PropPointDisplaySize;
         SerializedProperty m_PropCutouts;
@@ -81,6 +84,9 @@ namespace GaussianSplatting.Editor
             m_PropHighPrecisionRT = serializedObject.FindProperty("m_HighPrecisionRT");
             m_PropRuntimeHalfPrecisionSH = serializedObject.FindProperty("m_RuntimeHalfPrecisionSH");
             m_PropSHLodEnabled = serializedObject.FindProperty("m_SHLodEnabled");
+            m_PropRenderScale = serializedObject.FindProperty("m_RenderScale");
+            m_PropContributionCullThreshold = serializedObject.FindProperty("m_ContributionCullThreshold");
+            m_PropSortPasses = serializedObject.FindProperty("m_SortPasses");
             m_PropRenderMode = serializedObject.FindProperty("m_RenderMode");
             m_PropPointDisplaySize = serializedObject.FindProperty("m_PointDisplaySize");
             m_PropCutouts = serializedObject.FindProperty("m_Cutouts");
@@ -137,6 +143,9 @@ namespace GaussianSplatting.Editor
             EditorGUILayout.PropertyField(m_PropHighPrecisionRT);
             EditorGUILayout.PropertyField(m_PropRuntimeHalfPrecisionSH);
             EditorGUILayout.PropertyField(m_PropSHLodEnabled);
+            EditorGUILayout.PropertyField(m_PropRenderScale);
+            EditorGUILayout.PropertyField(m_PropContributionCullThreshold);
+            EditorGUILayout.PropertyField(m_PropSortPasses);
             EditorGUILayout.Space();
             GUILayout.Label("Debugging Tweaks", EditorStyles.boldLabel);
             EditorGUILayout.PropertyField(m_PropRenderMode);

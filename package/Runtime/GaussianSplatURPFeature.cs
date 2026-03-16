@@ -59,7 +59,14 @@ namespace GaussianSplatting.Runtime
                 rtDesc.msaaSamples = 1;
                 var gsRenderer = Object.FindAnyObjectByType<GaussianSplatRenderer>();
                 rtDesc.graphicsFormat = gsRenderer != null ? gsRenderer.renderTargetFormat : GraphicsFormat.R16G16B16A16_SFloat;
-                
+
+                float renderScale = gsRenderer != null ? gsRenderer.m_RenderScale : 1.0f;
+                if (renderScale < 1.0f)
+                {
+                    rtDesc.width = Mathf.Max(1, Mathf.RoundToInt(rtDesc.width * renderScale));
+                    rtDesc.height = Mathf.Max(1, Mathf.RoundToInt(rtDesc.height * renderScale));
+                }
+
                 // Create render texture
                 var gaussianSplatRT = UniversalRenderer.CreateRenderGraphTexture(renderGraph, rtDesc, GaussianSplatRTName, true);
 
