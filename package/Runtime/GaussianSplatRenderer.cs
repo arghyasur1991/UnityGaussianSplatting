@@ -175,6 +175,10 @@ namespace GaussianSplatting.Runtime
                 mpb.SetFloat(GaussianSplatRenderer.Props.SplatOpacityScale, gs.m_OpacityScale);
                 mpb.SetFloat(GaussianSplatRenderer.Props.SplatSize, gs.m_PointDisplaySize);
                 mpb.SetFloat(GaussianSplatRenderer.Props.QuadExtent, gs.m_QuadExtent);
+                int eyeW = XRSettings.eyeTextureWidth, eyeH = XRSettings.eyeTextureHeight;
+                float fullW = eyeW != 0 ? eyeW : cam.pixelWidth;
+                float fullH = eyeH != 0 ? eyeH : cam.pixelHeight;
+                mpb.SetVector(GaussianSplatRenderer.Props.SplatScreenParams, new Vector4(fullW, fullH, 0, 0));
                 mpb.SetInteger(GaussianSplatRenderer.Props.SHOrder, gs.m_SHOrder);
                 mpb.SetInteger(GaussianSplatRenderer.Props.SHOnly, gs.m_SHOnly ? 1 : 0);
                 mpb.SetInteger(GaussianSplatRenderer.Props.DisplayIndex, gs.m_RenderMode == GaussianSplatRenderer.RenderMode.DebugPointIndices ? 1 : 0);
@@ -442,6 +446,7 @@ namespace GaussianSplatting.Runtime
             public static readonly int IndirectIndexCount = Shader.PropertyToID("_IndirectIndexCount");
             public static readonly int SHLodEnabled = Shader.PropertyToID("_SHLodEnabled");
             public static readonly int ContributionCullThreshold = Shader.PropertyToID("_ContributionCullThreshold");
+            public static readonly int SplatScreenParams = Shader.PropertyToID("_SplatScreenParams");
         }
 
         [field: NonSerialized] public bool editModified { get; private set; }
