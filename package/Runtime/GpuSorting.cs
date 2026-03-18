@@ -35,6 +35,7 @@ namespace GaussianSplatting.Runtime
             public GraphicsBuffer   inputKeys;
             public GraphicsBuffer   inputValues;
             public SupportResources resources;
+            public int              maxPasses; // 0 = use all 4 passes (full 32-bit sort)
             internal int workGroupCount;
         }
 
@@ -172,8 +173,10 @@ namespace GaussianSplatting.Runtime
             cmd.SetComputeBufferParam(m_CS, m_kernelInitDeviceRadixSort, "b_globalHist", args.resources.globalHistBuffer);
             cmd.DispatchCompute(m_CS, m_kernelInitDeviceRadixSort, 1, 1, 1);
 
-            // Execute the sort algorithm in 8-bit increments
-            for (constants.radixShift = 0; constants.radixShift < 32; constants.radixShift += DEVICE_RADIX_SORT_BITS)
+            int passes = args.maxPasses > 0 ? Mathf.Clamp(args.maxPasses, 2, 4) : 4;
+            uint startShift = (uint)(4 - passes) * DEVICE_RADIX_SORT_BITS;
+
+            for (constants.radixShift = startShift; constants.radixShift < 32; constants.radixShift += DEVICE_RADIX_SORT_BITS)
             {
                 cmd.SetComputeIntParam(m_CS, "e_radixShift", (int)constants.radixShift);
 

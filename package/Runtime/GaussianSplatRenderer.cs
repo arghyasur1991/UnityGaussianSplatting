@@ -346,6 +346,8 @@ namespace GaussianSplatting.Runtime
         public float m_ContributionCullThreshold = 0.0f;
         [Range(0.25f, 1f)] [Tooltip("Render scale for splat pass (1.0 = full res). Quest: 0.5")]
         public float m_RenderScale = 1.0f;
+        [Range(2, 4)] [Tooltip("Radix sort passes (4 = full 32-bit sort). Quest: 2 (top 16 bits only)")]
+        public int m_SortPasses = 4;
         public RenderMode m_RenderMode = RenderMode.Splats;
         [Range(1.0f,15.0f)] public float m_PointDisplaySize = 3.0f;
 
@@ -830,7 +832,10 @@ namespace GaussianSplatting.Runtime
             // sort the splats
             EnsureSorterAndRegister();
             if (m_Sorter.Valid)
+            {
+                m_SorterArgs.maxPasses = m_SortPasses;
                 m_Sorter.Dispatch(cmd, m_SorterArgs);
+            }
             cmd.EndSample(s_ProfSort);
         }
 
