@@ -607,44 +607,27 @@ SplatData LoadSplatData(uint idx)
     return s;
 }
 
-struct SplatFormatParams
+void CalcFormatParams(out uint scaleFmt, out uint shFormat, out uint otherStride)
 {
-    uint scaleFmt;
-    uint shFormat;
-    uint otherStride;
-    uint shStride;
-};
+    scaleFmt = (_SplatFormat >> 8) & 0xFF;
+    shFormat = (_SplatFormat >> 16) & 0xFF;
 
-SplatFormatParams CalcFormatParams()
-{
-    SplatFormatParams p;
-    p.scaleFmt = (_SplatFormat >> 8) & 0xFF;
-    p.shFormat = (_SplatFormat >> 16) & 0xFF;
-
-    p.otherStride = 4;
-    if (p.scaleFmt == VECTOR_FMT_32F)       p.otherStride += 12;
-    else if (p.scaleFmt == VECTOR_FMT_16)   p.otherStride += 6;
-    else if (p.scaleFmt == VECTOR_FMT_11)   p.otherStride += 4;
-    else if (p.scaleFmt == VECTOR_FMT_6)    p.otherStride += 2;
-    if (p.shFormat > VECTOR_FMT_6)          p.otherStride += 2;
-
-    p.shStride = 0;
-    if (p.shFormat == VECTOR_FMT_32F)                           p.shStride = 192;
-    else if (p.shFormat == VECTOR_FMT_16 || p.shFormat > VECTOR_FMT_6) p.shStride = 96;
-    else if (p.shFormat == VECTOR_FMT_11)                       p.shStride = 60;
-    else if (p.shFormat == VECTOR_FMT_6)                        p.shStride = 32;
-
-    return p;
+    otherStride = 4;
+    if (scaleFmt == VECTOR_FMT_32F)       otherStride += 12;
+    else if (scaleFmt == VECTOR_FMT_16)   otherStride += 6;
+    else if (scaleFmt == VECTOR_FMT_11)   otherStride += 4;
+    else if (scaleFmt == VECTOR_FMT_6)    otherStride += 2;
+    if (shFormat > VECTOR_FMT_6)          otherStride += 2;
 }
 
-SplatData LoadSplatDataNoSH(uint idx, uint3 coord, half4 preloadedCol, SplatFormatParams fp)
+SplatData LoadSplatDataNoSH(uint idx, uint3 coord, half4 preloadedCol, uint scaleFmt, uint otherStride)
 {
     SplatData s = (SplatData)0;
-    uint otherAddr = idx * fp.otherStride;
+    uint otherAddr = idx * otherStride;
 
     s.pos   = LoadSplatPosValue(idx);
     s.rot   = DecodeRotation(DecodePacked_10_10_10_2(LoadUInt(_SplatOther, otherAddr)));
-    s.scale = LoadAndDecodeVector(_SplatOther, otherAddr + 4, fp.scaleFmt);
+    s.scale = LoadAndDecodeVector(_SplatOther, otherAddr + 4, scaleFmt);
     half4 col = preloadedCol;
 
     uint chunkIdx = idx / kChunkSize;
@@ -670,16 +653,22 @@ SplatData LoadSplatDataNoSH(uint idx, uint3 coord, half4 preloadedCol, SplatForm
     return s;
 }
 
-void LoadSplatSH(uint idx, uint maxOrder, inout SplatSHData sh, SplatFormatParams fp)
+void LoadSplatSH(uint idx, uint maxOrder, inout SplatSHData sh, uint shFormat, uint otherStride)
 {
     if (maxOrder == 0)
         return;
 
-    uint shIndex = idx;
-    if (fp.shFormat > VECTOR_FMT_6)
-        shIndex = LoadUShort(_SplatOther, idx * fp.otherStride + fp.otherStride - 2);
+    uint shStride = 0;
+    if (shFormat == VECTOR_FMT_32F)                           shStride = 192;
+    else if (shFormat == VECTOR_FMT_16 || shFormat > VECTOR_FMT_6) shStride = 96;
+    else if (shFormat == VECTOR_FMT_11)                       shStride = 60;
+    else if (shFormat == VECTOR_FMT_6)                        shStride = 32;
 
-    uint shOffset = shIndex * fp.shStride;
+    uint shIndex = idx;
+    if (shFormat > VECTOR_FMT_6)
+        shIndex = LoadUShort(_SplatOther, idx * otherStride + otherStride - 2);
+
+    uint shOffset = shIndex * shStride;
     uint4 shRaw0 = _SplatSH.Load4(shOffset);
     uint4 shRaw1 = _SplatSH.Load4(shOffset + 16);
 
@@ -689,7 +678,7 @@ void LoadSplatSH(uint idx, uint maxOrder, inout SplatSHData sh, SplatFormatParam
     if (chunkIdx < _SplatChunkCount)
     {
         SplatChunkInfo chunk = _SplatChunks[chunkIdx];
-        if (fp.shFormat > VECTOR_FMT_32F && fp.shFormat <= VECTOR_FMT_6)
+        if (shFormat > VECTOR_FMT_32F && shFormat <= VECTOR_FMT_6)
         {
             shMin = half3(f16tof32(chunk.shR    ), f16tof32(chunk.shG    ), f16tof32(chunk.shB    ));
             shMax = half3(f16tof32(chunk.shR>>16), f16tof32(chunk.shG>>16), f16tof32(chunk.shB>>16));
@@ -700,7 +689,7 @@ void LoadSplatSH(uint idx, uint maxOrder, inout SplatSHData sh, SplatFormatParam
     #define DECODE_SH_32F(dst, raw, off) dst = asfloat(raw.off)
     #define LERP_SH(dst) if (useChunkSH) dst = lerp(shMin, shMax, dst)
 
-    if (fp.shFormat == VECTOR_FMT_32F)
+    if (shFormat == VECTOR_FMT_32F)
     {
         sh.sh1.r  = asfloat(shRaw0.x); sh.sh1.g = asfloat(shRaw0.y); sh.sh1.b = asfloat(shRaw0.z);
         sh.sh2.r  = asfloat(shRaw0.w); sh.sh2.g = asfloat(shRaw1.x); sh.sh2.b = asfloat(shRaw1.y);
@@ -736,7 +725,7 @@ void LoadSplatSH(uint idx, uint maxOrder, inout SplatSHData sh, SplatFormatParam
             }
         }
     }
-    else if (fp.shFormat == VECTOR_FMT_16 || fp.shFormat > VECTOR_FMT_6)
+    else if (shFormat == VECTOR_FMT_16 || shFormat > VECTOR_FMT_6)
     {
         sh.sh1.r  = f16tof32(shRaw0.x      ); sh.sh1.g = f16tof32(shRaw0.x >> 16); sh.sh1.b = f16tof32(shRaw0.y      );
         sh.sh2.r  = f16tof32(shRaw0.y >> 16); sh.sh2.g = f16tof32(shRaw0.z      ); sh.sh2.b = f16tof32(shRaw0.z >> 16);
@@ -766,7 +755,7 @@ void LoadSplatSH(uint idx, uint maxOrder, inout SplatSHData sh, SplatFormatParam
             }
         }
     }
-    else if (fp.shFormat == VECTOR_FMT_11)
+    else if (shFormat == VECTOR_FMT_11)
     {
         sh.sh1 = DecodePacked_11_10_11(shRaw0.x);
         sh.sh2 = DecodePacked_11_10_11(shRaw0.y);
@@ -792,7 +781,7 @@ void LoadSplatSH(uint idx, uint maxOrder, inout SplatSHData sh, SplatFormatParam
             }
         }
     }
-    else if (fp.shFormat == VECTOR_FMT_6)
+    else if (shFormat == VECTOR_FMT_6)
     {
         sh.sh1  = DecodePacked_5_6_5(shRaw0.x);
         sh.sh2  = DecodePacked_5_6_5(shRaw0.x >> 16);

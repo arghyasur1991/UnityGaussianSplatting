@@ -271,8 +271,9 @@ void CSCalcViewData (uint3 id : SV_DispatchThreadID)
     }
 
     // --- Stage 4: full splat data (no SH yet) ---
-    SplatFormatParams fp = CalcFormatParams();
-    SplatData splat = LoadSplatDataNoSH(idx, coord, fullCol, fp);
+    uint scaleFmt, shFormat, otherStride;
+    CalcFormatParams(scaleFmt, shFormat, otherStride);
+    SplatData splat = LoadSplatDataNoSH(idx, coord, fullCol, scaleFmt, otherStride);
     half opacityScale = _SplatOpacityScale;
 
     // SH LOD: determine max SH order based on screen-space projected size
@@ -285,7 +286,7 @@ void CSCalcViewData (uint3 id : SV_DispatchThreadID)
             shOrder = min(shOrder, 1u);
     }
 
-    LoadSplatSH(idx, shOrder, splat.sh, fp);
+    LoadSplatSH(idx, shOrder, splat.sh, shFormat, otherStride);
 
     if (_IsStereo)
     {
