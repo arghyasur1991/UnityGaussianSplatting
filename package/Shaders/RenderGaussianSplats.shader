@@ -20,6 +20,7 @@ CGPROGRAM
 #include "GaussianSplatting.hlsl"
 
 StructuredBuffer<uint> _OrderBuffer;
+float _QuadExtent;
 
 struct v2f
 {
@@ -55,7 +56,7 @@ v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
 
 		uint idx = vtxID;
 		float2 quadPos = float2(idx&1, (idx>>1)&1) * 2.0 - 1.0;
-		quadPos *= 2;
+		quadPos *= _QuadExtent;
 
 		o.pos = quadPos;
 
@@ -84,7 +85,7 @@ v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
 half4 frag (v2f i) : SV_Target
 {
 	float power = -dot(i.pos, i.pos);
-	half alpha = exp(power);
+	half alpha = exp2(power * 1.4426950408889634);
 	if (i.col.a >= 0)
 	{
 		alpha = saturate(alpha * i.col.a);

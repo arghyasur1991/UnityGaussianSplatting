@@ -123,6 +123,15 @@ namespace GaussianSplatting.Runtime
             return true;
         }
 
+        public GraphicsFormat GetPreferredRTFormat()
+        {
+            foreach (var kvp in m_ActiveSplats)
+            {
+                return kvp.Item1.renderTargetFormat;
+            }
+            return GraphicsFormat.R16G16B16A16_SFloat;
+        }
+
         // New optimized method that prepares everything once for stereo rendering
         // This does the sorting and calculates view data, but doesn't actually render
         // ReSharper disable once MemberCanBePrivate.Global - used by HDRP/URP features that are not always compiled
@@ -176,6 +185,7 @@ namespace GaussianSplatting.Runtime
                 mpb.SetFloat(GaussianSplatRenderer.Props.SplatScale, gs.m_SplatScale);
                 mpb.SetFloat(GaussianSplatRenderer.Props.SplatOpacityScale, gs.m_OpacityScale);
                 mpb.SetFloat(GaussianSplatRenderer.Props.SplatSize, gs.m_PointDisplaySize);
+                mpb.SetFloat(GaussianSplatRenderer.Props.QuadExtent, gs.m_QuadExtent);
                 mpb.SetInteger(GaussianSplatRenderer.Props.SHOrder, gs.m_SHOrder);
                 mpb.SetInteger(GaussianSplatRenderer.Props.SHOnly, gs.m_SHOnly ? 1 : 0);
                 mpb.SetInteger(GaussianSplatRenderer.Props.DisplayIndex, gs.m_RenderMode == GaussianSplatRenderer.RenderMode.DebugPointIndices ? 1 : 0);
@@ -258,7 +268,7 @@ namespace GaussianSplatting.Runtime
 
             InitialClearCmdBuffer(cam);
 
-            m_CommandBuffer.GetTemporaryRT(GaussianSplatRenderer.Props.GaussianSplatRT, -1, -1, 0, FilterMode.Point, GraphicsFormat.R16G16B16A16_SFloat);
+            m_CommandBuffer.GetTemporaryRT(GaussianSplatRenderer.Props.GaussianSplatRT, -1, -1, 0, FilterMode.Point, GetPreferredRTFormat());
             m_CommandBuffer.SetRenderTarget(GaussianSplatRenderer.Props.GaussianSplatRT, BuiltinRenderTextureType.CurrentActive);
             m_CommandBuffer.ClearRenderTarget(RTClearFlags.Color, new Color(0, 0, 0, 0), 0, 0);
 
@@ -313,6 +323,12 @@ namespace GaussianSplatting.Runtime
         public float m_AdaptiveSortMoveThreshold = 0.01f;
         [Tooltip("Camera rotation threshold for adaptive sort (degrees)")]
         public float m_AdaptiveSortRotThreshold = 0.5f;
+        [Tooltip("Use 16-bit float render target (RGBA16F). Disable for RGBA8 on Quest for bandwidth savings")]
+        public bool m_HighPrecisionRT = true;
+        [Range(1f, 3f)] [Tooltip("Quad extent multiplier for splat rendering. Quest: 2.0")]
+        public float m_QuadExtent = 3.0f;
+        [Range(0f, 1f)] [Tooltip("Cull splats with opacity*screenProxy^2 below this. 0 = disabled. Quest: 0.1")]
+        public float m_ContributionCullThreshold = 0.0f;
         public RenderMode m_RenderMode = RenderMode.Splats;
         [Range(1.0f,15.0f)] public float m_PointDisplaySize = 3.0f;
 
@@ -417,6 +433,8 @@ namespace GaussianSplatting.Runtime
             public static readonly int MatrixProjRight = Shader.PropertyToID("_MatrixProjRight");
             public static readonly int MatrixVP = Shader.PropertyToID("_MatrixVP");
             public static readonly int MatrixP = Shader.PropertyToID("_MatrixP");
+            public static readonly int QuadExtent = Shader.PropertyToID("_QuadExtent");
+            public static readonly int ContributionCullThreshold = Shader.PropertyToID("_ContributionCullThreshold");
         }
 
         [field: NonSerialized] public bool editModified { get; private set; }
@@ -427,6 +445,7 @@ namespace GaussianSplatting.Runtime
 
         public GaussianSplatAsset asset => m_Asset;
         public int splatCount => m_SplatCount;
+        public GraphicsFormat renderTargetFormat => m_HighPrecisionRT ? GraphicsFormat.R16G16B16A16_SFloat : GraphicsFormat.R8G8B8A8_UNorm;
 
         enum KernelIndices
         {
@@ -760,6 +779,8 @@ namespace GaussianSplatting.Runtime
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHOrder, m_SHOrder);
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHOnly, m_SHOnly ? 1 : 0);
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHLodEnabled, m_SHLodEnabled ? 1 : 0);
+            cmb.SetComputeFloatParam(m_CSSplatUtilities, Props.QuadExtent, m_QuadExtent);
+            cmb.SetComputeFloatParam(m_CSSplatUtilities, Props.ContributionCullThreshold, m_ContributionCullThreshold);
 
             m_CSSplatUtilities.GetKernelThreadGroupSizes((int)KernelIndices.CalcViewData, out uint gsX, out _, out _);
             cmb.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.CalcViewData, (m_SplatCount + (int)gsX - 1)/(int)gsX, 1, 1);

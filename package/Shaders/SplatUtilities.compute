@@ -97,6 +97,8 @@ RWStructuredBuffer<SplatViewData> _SplatViewData;
 
 float _SplatScale;
 float _SplatOpacityScale;
+float _QuadExtent;
+float _ContributionCullThreshold;
 uint _SHOrder;
 uint _SHOnly;
 uint _SHLodEnabled;
