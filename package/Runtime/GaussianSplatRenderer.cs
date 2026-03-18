@@ -148,8 +148,11 @@ namespace GaussianSplatting.Runtime
 
                 // Sort the splats
                 var matrix = gs.transform.localToWorldMatrix;
-                if (gs.m_FrameCounter % gs.m_SortNthFrame == 0)
+                if (gs.ShouldSort(cam))
+                {
                     gs.SortPoints(cmb, cam, matrix);
+                    gs.OnSorted(cam);
+                }
                 ++gs.m_FrameCounter;
 
                 // Prepare material and view data
@@ -302,8 +305,14 @@ namespace GaussianSplatting.Runtime
         public bool m_SHOnly;
         [Tooltip("Distance-based SH LOD: reduce SH order for small/distant splats. Quest: enable")]
         public bool m_SHLodEnabled = true;
-        [Range(1,30)] [Tooltip("Sort splats only every N frames")]
+        [Range(1,30)] [Tooltip("Sort splats only every N frames. Quest: 10")]
         public int m_SortNthFrame = 1;
+        [Tooltip("Skip sort when camera is stationary. Quest: enable")]
+        public bool m_AdaptiveSort = false;
+        [Tooltip("Camera movement threshold for adaptive sort (meters)")]
+        public float m_AdaptiveSortMoveThreshold = 0.01f;
+        [Tooltip("Camera rotation threshold for adaptive sort (degrees)")]
+        public float m_AdaptiveSortRotThreshold = 0.5f;
         public RenderMode m_RenderMode = RenderMode.Splats;
         [Range(1.0f,15.0f)] public float m_PointDisplaySize = 3.0f;
 
@@ -346,6 +355,9 @@ namespace GaussianSplatting.Runtime
         internal Material m_MatDebugBoxes;
 
         internal int m_FrameCounter;
+        Vector3 m_LastSortCamPos;
+        Quaternion m_LastSortCamRot;
+        bool m_SortedAtLeastOnce;
         GaussianSplatAsset m_PrevAsset;
         Hash128 m_PrevHash;
         bool m_Registered;
@@ -550,9 +562,34 @@ namespace GaussianSplatting.Runtime
             }
         }
 
+        bool ShouldSort(Camera cam)
+        {
+            if (!m_SortedAtLeastOnce)
+                return true;
+
+            if (m_AdaptiveSort)
+            {
+                var pos = cam.transform.position;
+                var rot = cam.transform.rotation;
+                float moveDist = Vector3.Distance(pos, m_LastSortCamPos);
+                float rotAngle = Quaternion.Angle(rot, m_LastSortCamRot);
+                return moveDist > m_AdaptiveSortMoveThreshold || rotAngle > m_AdaptiveSortRotThreshold;
+            }
+
+            return m_FrameCounter % m_SortNthFrame == 0;
+        }
+
+        void OnSorted(Camera cam)
+        {
+            m_LastSortCamPos = cam.transform.position;
+            m_LastSortCamRot = cam.transform.rotation;
+            m_SortedAtLeastOnce = true;
+        }
+
         public void OnEnable()
         {
             m_FrameCounter = 0;
+            m_SortedAtLeastOnce = false;
             if (!resourcesAreSetUp)
                 return;
 
