@@ -53,40 +53,40 @@ void CalcCovariance3D(float3x3 rotMat, out float3 sigma0, out float3 sigma1)
 }
 
 // from "EWA Splatting" (Zwicker et al 2002) eq. 31
+// Optimized: J has zero third row, so T=J*W is 2x3. Final result is 2x2 symmetric.
 float3 CalcCovariance2D(float3 worldPos, float3 cov3d0, float3 cov3d1, float4x4 matrixV, float4x4 matrixP, float4 screenParams)
 {
-    float4x4 viewMatrix = matrixV;
-    float3 viewPos = mul(viewMatrix, float4(worldPos, 1)).xyz;
+    float3 viewPos = mul(matrixV, float4(worldPos, 1)).xyz;
 
-    // this is needed in order for splats that are visible in view but clipped "quite a lot" to work
-    float aspect = matrixP._m00 / matrixP._m11;
-    float tanFovX = rcp(matrixP._m00);
-    float tanFovY = rcp(matrixP._m11 * aspect);
-    float limX = 1.3 * tanFovX;
-    float limY = 1.3 * tanFovY;
-    viewPos.x = clamp(viewPos.x / viewPos.z, -limX, limX) * viewPos.z;
-    viewPos.y = clamp(viewPos.y / viewPos.z, -limY, limY) * viewPos.z;
+    float rz = rcp(viewPos.z);
+    float rz2 = rz * rz;
 
-    float focal = screenParams.x * matrixP._m00 / 2;
+    float limX = 1.3 * rcp(matrixP._m00);
+    float limY = 1.3 * rcp(matrixP._m11 * (matrixP._m00 / matrixP._m11));
+    viewPos.x = clamp(viewPos.x * rz, -limX, limX) * viewPos.z;
+    viewPos.y = clamp(viewPos.y * rz, -limY, limY) * viewPos.z;
 
-    float3x3 J = float3x3(
-        focal / viewPos.z, 0, -(focal * viewPos.x) / (viewPos.z * viewPos.z),
-        0, focal / viewPos.z, -(focal * viewPos.y) / (viewPos.z * viewPos.z),
-        0, 0, 0
-    );
-    float3x3 W = (float3x3)viewMatrix;
-    float3x3 T = mul(J, W);
-    float3x3 V = float3x3(
-        cov3d0.x, cov3d0.y, cov3d0.z,
-        cov3d0.y, cov3d1.x, cov3d1.y,
-        cov3d0.z, cov3d1.y, cov3d1.z
-    );
-    float3x3 cov = mul(T, mul(V, transpose(T)));
+    float focal = screenParams.x * matrixP._m00 * 0.5;
+    float fz = focal * rz;
+    float fxz2 = focal * viewPos.x * rz2;
+    float fyz2 = focal * viewPos.y * rz2;
 
-    // Low pass filter to make each splat at least 1px size.
-    cov._m00 += 0.3;
-    cov._m11 += 0.3;
-    return float3(cov._m00, cov._m01, cov._m11);
+    // J is 2x3: row0 = (fz, 0, -fxz2), row1 = (0, fz, -fyz2)
+    // T = J * W, only 2 rows of 3 components each
+    float3x3 W = (float3x3)matrixV;
+    float3 t0 = fz * W[0] - fxz2 * W[2];
+    float3 t1 = fz * W[1] - fyz2 * W[2];
+
+    // V is symmetric 3x3: row0=(a,b,c), row1=(b,d,e), row2=(c,e,f)
+    float a = cov3d0.x, b = cov3d0.y, c = cov3d0.z;
+    float d = cov3d1.x, e = cov3d1.y, f = cov3d1.z;
+
+    // Vt0 = V * t0, Vt1 = V * t1 (symmetric V, so row/col access is equivalent)
+    float3 Vt0 = float3(a*t0.x + b*t0.y + c*t0.z, b*t0.x + d*t0.y + e*t0.z, c*t0.x + e*t0.y + f*t0.z);
+    float3 Vt1 = float3(a*t1.x + b*t1.y + c*t1.z, b*t1.x + d*t1.y + e*t1.z, c*t1.x + e*t1.y + f*t1.z);
+
+    // cov2d = T * V * T^T -> 2x2 symmetric: (t0.Vt0, t0.Vt1, t1.Vt1)
+    return float3(dot(t0, Vt0) + 0.3, dot(t0, Vt1), dot(t1, Vt1) + 0.3);
 }
 
 float3 CalcConic(float3 cov2d)
