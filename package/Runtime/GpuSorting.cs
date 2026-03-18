@@ -174,6 +174,7 @@ namespace GaussianSplatting.Runtime
             cmd.DispatchCompute(m_CS, m_kernelInitDeviceRadixSort, 1, 1, 1);
 
             int passes = args.maxPasses > 0 ? Mathf.Clamp(args.maxPasses, 2, 4) : 4;
+            if ((passes & 1) != 0) passes = Mathf.Min(passes + 1, 4);
             uint startShift = (uint)(4 - passes) * DEVICE_RADIX_SORT_BITS;
 
             for (constants.radixShift = startShift; constants.radixShift < 32; constants.radixShift += DEVICE_RADIX_SORT_BITS)

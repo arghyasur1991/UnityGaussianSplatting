@@ -206,11 +206,51 @@ void CSCalcViewData (uint3 id : SV_DispatchThreadID)
     if (idx >= _SplatCount)
         return;
 
-    // --- Cheap early-out: load only position first ---
+    // --- Stage 1: cheapest geometric checks (position only) ---
     float3 splatPos = LoadSplatPos(idx);
     float3 centerWorldPos = mul(_MatrixObjectToWorld, float4(splatPos,1)).xyz;
 
-    // Check deleted / cut before expensive loads
+    float4x4 cullVP = _IsStereo ? _ViewProjMatrixLeft : _MatrixVP;
+    float4 clip = mul(cullVP, float4(centerWorldPos, 1));
+
+    bool behindCam = (clip.w <= 0);
+    bool outsideFrustum = false;
+    if (!behindCam)
+    {
+        float3 ndc = clip.xyz / clip.w;
+        outsideFrustum = any(abs(ndc.xy) > 2.5) || ndc.z < -0.2 || ndc.z > 1.2;
+    }
+
+    float camDist = length(centerWorldPos - _VecWorldSpaceCameraPos.xyz);
+    float splatScale = _SplatScale;
+    bool tooSmall = (_VecScreenParams.x * splatScale * 0.5) / max(camDist, 0.01) < 0.3;
+
+    if (behindCam || outsideFrustum || tooSmall)
+    {
+        SplatViewData view = (SplatViewData)0;
+        if (_IsStereo) { _SplatViewData[idx * 2] = view; _SplatViewData[idx * 2 + 1] = view; }
+        else { _SplatViewData[idx] = view; }
+        return;
+    }
+
+    // --- Stage 2: color texture load + transparency/contribution checks ---
+    uint3 coord = SplatIndexToPixelIndex(idx);
+    half4 fullCol = LoadSplatColTex(coord);
+    bool tooTransparent = (fullCol.a * _SplatOpacityScale) < (1.0 / 255.0);
+
+    float screenProxy = (_VecScreenParams.x * splatScale * 0.5) / max(camDist, 0.01);
+    bool lowContribution = _ContributionCullThreshold > 0 &&
+        (fullCol.a * screenProxy * screenProxy) < _ContributionCullThreshold;
+
+    if (tooTransparent || lowContribution)
+    {
+        SplatViewData view = (SplatViewData)0;
+        if (_IsStereo) { _SplatViewData[idx * 2] = view; _SplatViewData[idx * 2 + 1] = view; }
+        else { _SplatViewData[idx] = view; }
+        return;
+    }
+
+    // --- Stage 3: deleted/cut checks (IsSplatCut iterates cutout array) ---
     bool isDeleted = false;
     if (_SplatBitsValid)
     {
@@ -222,53 +262,23 @@ void CSCalcViewData (uint3 id : SV_DispatchThreadID)
     }
     bool isCut = IsSplatCut(splatPos);
 
-    // Use left-eye VP for stereo frustum check, explicit _MatrixVP for mono
-    float4x4 cullVP = _IsStereo ? _ViewProjMatrixLeft : _MatrixVP;
-    float4 clip = mul(cullVP, float4(centerWorldPos, 1));
-
-    // Behind camera
-    bool culled = (clip.w <= 0);
-
-    // Frustum cull with generous margin (NDC ± 2.5)
-    if (!culled)
-    {
-        float3 ndc = clip.xyz / clip.w;
-        culled = (abs(ndc.x) > 2.5 || abs(ndc.y) > 2.5);
-    }
-
-    // Deleted / cut
-    culled = culled || isDeleted || isCut;
-
-    if (culled)
+    if (isDeleted || isCut)
     {
         SplatViewData view = (SplatViewData)0;
-        if (_IsStereo)
-        {
-            _SplatViewData[idx * 2] = view;
-            _SplatViewData[idx * 2 + 1] = view;
-        }
-        else
-        {
-            _SplatViewData[idx] = view;
-        }
+        if (_IsStereo) { _SplatViewData[idx * 2] = view; _SplatViewData[idx * 2 + 1] = view; }
+        else { _SplatViewData[idx] = view; }
         return;
     }
 
-    // --- Passed early-out: load splat data (split: no SH yet) ---
+    // --- Stage 4: full splat data (no SH yet) ---
     SplatFormatParams fp = CalcFormatParams();
-    uint3 coord = SplatIndexToPixelIndex(idx);
-    half4 preloadedCol = LoadSplatColTex(coord);
-    SplatData splat = LoadSplatDataNoSH(idx, coord, preloadedCol, fp);
-
-    float splatScale = _SplatScale;
+    SplatData splat = LoadSplatDataNoSH(idx, coord, fullCol, fp);
     half opacityScale = _SplatOpacityScale;
 
     // SH LOD: determine max SH order based on screen-space projected size
     uint shOrder = _SHOrder;
     if (_SHLodEnabled && shOrder > 0)
     {
-        // Quick screen size proxy from clip space
-        float screenProxy = abs(clip.w) > 0.001 ? (splatScale * _VecScreenParams.x * 0.5 / abs(clip.w)) : 0;
         if (screenProxy < 3.0)
             shOrder = 0;
         else if (screenProxy < 8.0)

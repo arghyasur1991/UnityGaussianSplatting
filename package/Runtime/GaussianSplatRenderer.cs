@@ -98,7 +98,7 @@ namespace GaussianSplatting.Runtime
             foreach (var kvp in m_Splats)
             {
                 var gs = kvp.Key;
-                if (gs == null || !gs.isActiveAndEnabled || !gs.HasValidAsset || !gs.HasValidRenderSetup)
+                if (gs == null || !gs.isActiveAndEnabled || !gs.renderVisible || !gs.HasValidAsset || !gs.HasValidRenderSetup)
                     continue;
                 m_ActiveSplats.Add((kvp.Key, kvp.Value));
             }
@@ -456,6 +456,8 @@ namespace GaussianSplatting.Runtime
             public static readonly int ContributionCullThreshold = Shader.PropertyToID("_ContributionCullThreshold");
             public static readonly int SplatScreenParams = Shader.PropertyToID("_SplatScreenParams");
         }
+
+        [NonSerialized] public bool renderVisible = true;
 
         [field: NonSerialized] public bool editModified { get; private set; }
         [field: NonSerialized] public uint editSelectedSplats { get; private set; }
