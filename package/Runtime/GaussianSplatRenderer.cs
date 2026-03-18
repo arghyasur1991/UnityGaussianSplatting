@@ -132,6 +132,15 @@ namespace GaussianSplatting.Runtime
             return GraphicsFormat.R16G16B16A16_SFloat;
         }
 
+        public float GetPreferredRenderScale()
+        {
+            foreach (var kvp in m_ActiveSplats)
+            {
+                return kvp.Item1.m_RenderScale;
+            }
+            return 1.0f;
+        }
+
         // New optimized method that prepares everything once for stereo rendering
         // This does the sorting and calculates view data, but doesn't actually render
         // ReSharper disable once MemberCanBePrivate.Global - used by HDRP/URP features that are not always compiled
@@ -186,6 +195,12 @@ namespace GaussianSplatting.Runtime
                 mpb.SetFloat(GaussianSplatRenderer.Props.SplatOpacityScale, gs.m_OpacityScale);
                 mpb.SetFloat(GaussianSplatRenderer.Props.SplatSize, gs.m_PointDisplaySize);
                 mpb.SetFloat(GaussianSplatRenderer.Props.QuadExtent, gs.m_QuadExtent);
+                {
+                    int w = cam.pixelWidth, h = cam.pixelHeight;
+                    int ew = XRSettings.eyeTextureWidth, eh = XRSettings.eyeTextureHeight;
+                    mpb.SetVector(GaussianSplatRenderer.Props.SplatScreenParams,
+                        new Vector4(ew != 0 ? ew : w, eh != 0 ? eh : h, 0, 0));
+                }
                 mpb.SetInteger(GaussianSplatRenderer.Props.SHOrder, gs.m_SHOrder);
                 mpb.SetInteger(GaussianSplatRenderer.Props.SHOnly, gs.m_SHOnly ? 1 : 0);
                 mpb.SetInteger(GaussianSplatRenderer.Props.DisplayIndex, gs.m_RenderMode == GaussianSplatRenderer.RenderMode.DebugPointIndices ? 1 : 0);
@@ -329,6 +344,8 @@ namespace GaussianSplatting.Runtime
         public float m_QuadExtent = 3.0f;
         [Range(0f, 1f)] [Tooltip("Cull splats with opacity*screenProxy^2 below this. 0 = disabled. Quest: 0.1")]
         public float m_ContributionCullThreshold = 0.0f;
+        [Range(0.25f, 1f)] [Tooltip("Render scale for splat pass (1.0 = full res). Quest: 0.5")]
+        public float m_RenderScale = 1.0f;
         public RenderMode m_RenderMode = RenderMode.Splats;
         [Range(1.0f,15.0f)] public float m_PointDisplaySize = 3.0f;
 
@@ -435,6 +452,7 @@ namespace GaussianSplatting.Runtime
             public static readonly int MatrixP = Shader.PropertyToID("_MatrixP");
             public static readonly int QuadExtent = Shader.PropertyToID("_QuadExtent");
             public static readonly int ContributionCullThreshold = Shader.PropertyToID("_ContributionCullThreshold");
+            public static readonly int SplatScreenParams = Shader.PropertyToID("_SplatScreenParams");
         }
 
         [field: NonSerialized] public bool editModified { get; private set; }

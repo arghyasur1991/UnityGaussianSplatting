@@ -36,6 +36,7 @@ namespace GaussianSplatting.Runtime
                 internal TextureHandle SourceDepth;
                 internal TextureHandle GaussianSplatRT;
                 internal bool IsStereo;
+                internal bool IsScaled;
             }
 
             public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
@@ -59,9 +60,16 @@ namespace GaussianSplatting.Runtime
                 rtDesc.msaaSamples = 1;
                 var system = GaussianSplatRenderSystem.instance;
                 var rtFormat = system.GetPreferredRTFormat();
+                float renderScale = system.GetPreferredRenderScale();
+                bool isScaled = renderScale < 1.0f;
                 rtDesc.graphicsFormat = rtFormat;
-                
-                // Create render texture
+                if (isScaled)
+                {
+                    rtDesc.width = Mathf.Max(1, (int)(rtDesc.width * renderScale));
+                    rtDesc.height = Mathf.Max(1, (int)(rtDesc.height * renderScale));
+                }
+
+                // Create render texture (use bilinear for upscale when scaled)
                 var gaussianSplatRT = UniversalRenderer.CreateRenderGraphTexture(renderGraph, rtDesc, GaussianSplatRTName, true);
 
                 passData.CameraData = cameraData;
@@ -69,6 +77,7 @@ namespace GaussianSplatting.Runtime
                 passData.SourceDepth = resourceData.activeDepthTexture;
                 passData.GaussianSplatRT = gaussianSplatRT;
                 passData.IsStereo = isStereo;
+                passData.IsScaled = isScaled;
 
                 builder.UseTexture(resourceData.activeColorTexture, AccessFlags.ReadWrite);
                 builder.UseTexture(resourceData.activeDepthTexture);
@@ -115,11 +124,13 @@ namespace GaussianSplatting.Runtime
                     }
                     else
                     {
-                        // Single-eye rendering
                         commandBuffer.SetGlobalTexture(s_gaussianSplatRT, data.GaussianSplatRT);
-                        CoreUtils.SetRenderTarget(commandBuffer, data.GaussianSplatRT, data.SourceDepth, ClearFlag.Color, Color.clear);
+                        if (data.IsScaled)
+                            CoreUtils.SetRenderTarget(commandBuffer, data.GaussianSplatRT, ClearFlag.Color, Color.clear);
+                        else
+                            CoreUtils.SetRenderTarget(commandBuffer, data.GaussianSplatRT, data.SourceDepth, ClearFlag.Color, Color.clear);
                         Material matComposite = GaussianSplatRenderSystem.instance.SortAndRenderSplats(data.CameraData.camera, commandBuffer);
-                        
+
                         commandBuffer.BeginSample(GaussianSplatRenderSystem.s_ProfCompose);
                         Blitter.BlitCameraTexture(commandBuffer, data.GaussianSplatRT, data.SourceTexture, matComposite, 0);
                         commandBuffer.EndSample(GaussianSplatRenderSystem.s_ProfCompose);

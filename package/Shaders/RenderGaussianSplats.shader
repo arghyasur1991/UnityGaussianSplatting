@@ -21,6 +21,7 @@ CGPROGRAM
 
 StructuredBuffer<uint> _OrderBuffer;
 float _QuadExtent;
+float4 _SplatScreenParams;
 
 struct v2f
 {
@@ -62,7 +63,7 @@ v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
 
 		float2 axis1 = float2(f16tof32(view.packedAxis1 >> 16), f16tof32(view.packedAxis1));
 		float2 axis2 = float2(f16tof32(view.packedAxis2 >> 16), f16tof32(view.packedAxis2));
-		float2 deltaScreenPos = (quadPos.x * axis1 + quadPos.y * axis2) * 2 / _ScreenParams.xy;
+		float2 deltaScreenPos = (quadPos.x * axis1 + quadPos.y * axis2) * 2 / _SplatScreenParams.xy;
 		o.vertex = centerClipPos;
 		o.vertex.xy += deltaScreenPos * centerClipPos.w;
 
