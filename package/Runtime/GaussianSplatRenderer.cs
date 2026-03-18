@@ -601,7 +601,7 @@ namespace GaussianSplatting.Runtime
             }
         }
 
-        bool ShouldSort(Camera cam)
+        internal bool ShouldSort(Camera cam)
         {
             if (!m_SortedAtLeastOnce)
                 return true;
@@ -618,7 +618,7 @@ namespace GaussianSplatting.Runtime
             return m_FrameCounter % m_SortNthFrame == 0;
         }
 
-        void OnSorted(Camera cam)
+        internal void OnSorted(Camera cam)
         {
             m_LastSortCamPos = cam.transform.position;
             m_LastSortCamRot = cam.transform.rotation;
