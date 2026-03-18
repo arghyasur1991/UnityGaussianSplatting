@@ -400,6 +400,8 @@ namespace GaussianSplatting.Runtime
             public static readonly int MatrixMVRight = Shader.PropertyToID("_MatrixMVRight");
             public static readonly int MatrixProjLeft = Shader.PropertyToID("_MatrixProjLeft");
             public static readonly int MatrixProjRight = Shader.PropertyToID("_MatrixProjRight");
+            public static readonly int MatrixVP = Shader.PropertyToID("_MatrixVP");
+            public static readonly int MatrixP = Shader.PropertyToID("_MatrixP");
         }
 
         [field: NonSerialized] public bool editModified { get; private set; }
@@ -705,6 +707,10 @@ namespace GaussianSplatting.Runtime
             else
             {
                 cmb.SetComputeIntParam(m_CSSplatUtilities, Props.IsStereo, 0);
+                Matrix4x4 matProj = GL.GetGPUProjectionMatrix(cam.projectionMatrix, true);
+                Matrix4x4 matVP = matProj * matView;
+                cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.MatrixVP, matVP);
+                cmb.SetComputeMatrixParam(m_CSSplatUtilities, Props.MatrixP, matProj);
             }
 
             cmb.SetComputeVectorParam(m_CSSplatUtilities, Props.VecScreenParams, screenPar);

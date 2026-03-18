@@ -40,6 +40,8 @@
 float4x4 _MatrixObjectToWorld;
 float4x4 _MatrixWorldToObject;
 float4x4 _MatrixMV;
+float4x4 _MatrixVP;
+float4x4 _MatrixP;
 float4 _VecScreenParams;
 float4 _VecWorldSpaceCameraPos;
 int _SelectionMode;
@@ -197,21 +199,20 @@ SplatViewData CalculateEyeViewData(SplatData splat, float3 centerWorldPos, float
     return view;
 }
 
-[numthreads(GROUP_SIZE,1,1)]
+#define VIEW_GROUP_SIZE 256
+
+[numthreads(VIEW_GROUP_SIZE,1,1)]
 void CSCalcViewData (uint3 id : SV_DispatchThreadID)
 {
     uint idx = id.x;
     if (idx >= _SplatCount)
         return;
 
-    SplatData splat = LoadSplatData(idx);
-    
-    // Transform to world space
-    float3 centerWorldPos = mul(_MatrixObjectToWorld, float4(splat.pos,1)).xyz;
-    float splatScale = _SplatScale;
-    half opacityScale = _SplatOpacityScale;
+    // --- Cheap early-out: load only position first ---
+    float3 splatPos = LoadSplatPos(idx);
+    float3 centerWorldPos = mul(_MatrixObjectToWorld, float4(splatPos,1)).xyz;
 
-    // Check if deleted
+    // Check deleted / cut before expensive loads
     bool isDeleted = false;
     if (_SplatBitsValid)
     {
@@ -219,37 +220,64 @@ void CSCalcViewData (uint3 id : SV_DispatchThreadID)
         uint bitIdx = idx & 31;
         uint wordVal = _SplatDeletedBits.Load(wordIdx * 4);
         if (wordVal & (1 << bitIdx))
-        {
             isDeleted = true;
-        }
+    }
+    bool isCut = IsSplatCut(splatPos);
+
+    // Use left-eye VP for stereo frustum check, explicit _MatrixVP for mono
+    float4x4 cullVP = _IsStereo ? _ViewProjMatrixLeft : _MatrixVP;
+    float4 clip = mul(cullVP, float4(centerWorldPos, 1));
+
+    // Behind camera
+    bool culled = (clip.w <= 0);
+
+    // Frustum cull with generous margin (NDC ± 2.5)
+    if (!culled)
+    {
+        float3 ndc = clip.xyz / clip.w;
+        culled = (abs(ndc.x) > 2.5 || abs(ndc.y) > 2.5);
     }
 
-    // Check if cut
-    bool isCut = IsSplatCut(splat.pos);
+    // Deleted / cut
+    culled = culled || isDeleted || isCut;
+
+    if (culled)
+    {
+        SplatViewData view = (SplatViewData)0;
+        if (_IsStereo)
+        {
+            _SplatViewData[idx * 2] = view;
+            _SplatViewData[idx * 2 + 1] = view;
+        }
+        else
+        {
+            _SplatViewData[idx] = view;
+        }
+        return;
+    }
+
+    // --- Passed early-out: load full splat data (expensive) ---
+    SplatData splat = LoadSplatData(idx);
+    float splatScale = _SplatScale;
+    half opacityScale = _SplatOpacityScale;
 
     if (_IsStereo)
     {
-        // Compute full covariance, SH, and color using the left eye (expensive).
-        // Reuse axes and color for the right eye — the IPD offset has negligible
-        // effect on projected 2D shape. Only the clip position differs per eye.
         SplatViewData viewLeft = CalculateEyeViewData(splat, centerWorldPos, _ViewProjMatrixLeft,
             _MatrixMVLeft, _MatrixProjLeft, _VecScreenParams,
-            isDeleted, isCut, splatScale, opacityScale);
+            false, false, splatScale, opacityScale);
 
         SplatViewData viewRight = viewLeft;
-        float4 clipRight = mul(_ViewProjMatrixRight, float4(centerWorldPos, 1));
-        if (isDeleted || isCut)
-            clipRight.w = 0;
-        viewRight.pos = clipRight;
+        viewRight.pos = mul(_ViewProjMatrixRight, float4(centerWorldPos, 1));
 
         _SplatViewData[idx * 2] = viewLeft;
         _SplatViewData[idx * 2 + 1] = viewRight;
     }
     else
     {
-        _SplatViewData[idx] = CalculateEyeViewData(splat, centerWorldPos, UNITY_MATRIX_VP,
-            _MatrixMV, UNITY_MATRIX_P, _VecScreenParams,
-            isDeleted, isCut, splatScale, opacityScale);
+        _SplatViewData[idx] = CalculateEyeViewData(splat, centerWorldPos, _MatrixVP,
+            _MatrixMV, _MatrixP, _VecScreenParams,
+            false, false, splatScale, opacityScale);
     }
 }
 
