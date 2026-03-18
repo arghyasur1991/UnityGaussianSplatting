@@ -300,6 +300,8 @@ namespace GaussianSplatting.Runtime
         public int m_SHOrder = 3;
         [Tooltip("Show only Spherical Harmonics contribution, using gray color")]
         public bool m_SHOnly;
+        [Tooltip("Distance-based SH LOD: reduce SH order for small/distant splats. Quest: enable")]
+        public bool m_SHLodEnabled = true;
         [Range(1,30)] [Tooltip("Sort splats only every N frames")]
         public int m_SortNthFrame = 1;
         public RenderMode m_RenderMode = RenderMode.Splats;
@@ -372,6 +374,7 @@ namespace GaussianSplatting.Runtime
             public static readonly int SplatCount = Shader.PropertyToID("_SplatCount");
             public static readonly int SHOrder = Shader.PropertyToID("_SHOrder");
             public static readonly int SHOnly = Shader.PropertyToID("_SHOnly");
+            public static readonly int SHLodEnabled = Shader.PropertyToID("_SHLodEnabled");
             public static readonly int DisplayIndex = Shader.PropertyToID("_DisplayIndex");
             public static readonly int DisplayChunks = Shader.PropertyToID("_DisplayChunks");
             public static readonly int GaussianSplatRT = Shader.PropertyToID("_GaussianSplatRT");
@@ -719,6 +722,7 @@ namespace GaussianSplatting.Runtime
             cmb.SetComputeFloatParam(m_CSSplatUtilities, Props.SplatOpacityScale, m_OpacityScale);
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHOrder, m_SHOrder);
             cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHOnly, m_SHOnly ? 1 : 0);
+            cmb.SetComputeIntParam(m_CSSplatUtilities, Props.SHLodEnabled, m_SHLodEnabled ? 1 : 0);
 
             m_CSSplatUtilities.GetKernelThreadGroupSizes((int)KernelIndices.CalcViewData, out uint gsX, out _, out _);
             cmb.DispatchCompute(m_CSSplatUtilities, (int)KernelIndices.CalcViewData, (m_SplatCount + (int)gsX - 1)/(int)gsX, 1, 1);
