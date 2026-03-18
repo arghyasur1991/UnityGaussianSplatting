@@ -59,7 +59,9 @@ v2f vert (uint vtxID : SV_VertexID, uint instID : SV_InstanceID)
 
 		o.pos = quadPos;
 
-		float2 deltaScreenPos = (quadPos.x * view.axis1 + quadPos.y * view.axis2) * 2 / _ScreenParams.xy;
+		float2 axis1 = float2(f16tof32(view.packedAxis1 >> 16), f16tof32(view.packedAxis1));
+		float2 axis2 = float2(f16tof32(view.packedAxis2 >> 16), f16tof32(view.packedAxis2));
+		float2 deltaScreenPos = (quadPos.x * axis1 + quadPos.y * axis2) * 2 / _ScreenParams.xy;
 		o.vertex = centerClipPos;
 		o.vertex.xy += deltaScreenPos * centerClipPos.w;
 
