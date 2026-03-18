@@ -2,7 +2,7 @@
 
 > **Fork note:** This fork adds **Meta Quest 3 stereo VR rendering** and GPU performance optimizations.
 > Scenes with up to **~300K Gaussians render at 16–18 FPS on Quest 3** with no visible jittering or frame drops, even during close-up inspection.
-> See the [Quest VR stereo rendering PR](https://github.com/aras-p/UnityGaussianSplatting/pull/225) and the `feature/quest-stereo-perf` branch for details.
+> See the [Quest VR stereo rendering PR](https://github.com/aras-p/UnityGaussianSplatting/pull/225) for the stereo rendering base.
 
 SIGGRAPH 2023 had a paper "[**3D Gaussian Splatting for Real-Time Radiance Field Rendering**](https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/)" by Kerbl, Kopanas, Leimkühler, Drettakis
 that is really cool! Check out their website, source code repository, data sets and so on. I've decided to try to implement the realtime visualization part (i.e. the one that takes already-produced
@@ -94,7 +94,7 @@ at "Medium" asset quality level (282MB asset file):
 Room-scale scenes with **~300K Gaussians** running stereo VR rendering at native Quest 3 resolution:
 
 * **16–18 FPS** with no visible jittering or frame drops, including close-up views.
-* Performance optimizations on `feature/quest-stereo-perf` branch include: early-out frustum/contribution culling, SH LOD, packed view data (32B/splat), adaptive sort, reduced-resolution rendering, partial radix sort, and per-splat adaptive quad extent.
+* Performance optimizations (on `main`): early-out frustum/contribution culling, SH LOD, packed view data (32B/splat), adaptive sort, reduced-resolution rendering, partial radix sort, and per-splat adaptive quad extent.
 * Desktop rendering quality is unaffected — all optimizations use desktop-safe defaults with Quest-recommended values documented in Inspector tooltips.
 
 Besides the gaussian splat asset that is loaded into GPU memory, currently this also needs about 48 bytes of GPU memory
